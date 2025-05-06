@@ -1,0 +1,7 @@
+flask~=3.1.0
+openai~=1.77.0
+python-dotenv~=1.1.0
+sqlalchemy~=2.0.40
+requests~=2.32.3
+flask-migrate~=4.1.0
+alembic~=1.15.2

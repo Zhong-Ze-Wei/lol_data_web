@@ -10,8 +10,8 @@ with app.app_context():
     db.create_all()
 
     # 定义比赛 ID 的开始和结束 ID
-    start_id = 59500  # 起始 ID
-    end_id = 59900  # 结束 ID
+    start_id = 1  # 起始 ID
+    end_id = 60000  # 结束 ID
 
     # 创建比赛 ID 列表，包含从 start_id 到 end_id 的所有 ID
     match_ids = list(range(start_id, end_id + 1))

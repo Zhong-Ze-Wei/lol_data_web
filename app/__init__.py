@@ -1,4 +1,5 @@
 # app/__init__.py
+# 整个应用程序的初始化文件
 # Flask 项目的核心入口  应用工厂模式（Application Factory Pattern）
 
 from flask import Flask
