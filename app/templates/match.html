@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>比赛列表</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h1>所有比赛</h1>
+
+    <div class="container">
+        <!-- 筛选表单 -->
+        <div class="form-container">
+            <form method="GET" action="{{ url_for('match.show_matches') }}">
+                <div class="form-row">
+                    <!-- 队伍筛选框 -->
+                    <div class="form-item team-range">
+                        <div class="team-item">
+                            <label for="team_name1">战队1名称:</label>
+                            <input type="text" id="team_name1" name="team_name1" placeholder="请输入战队1名称" value="{{ request.args.get('team_name1', '') }}">
+                        </div>
+                        <div class="team-item">
+                            <label for="team_name2">战队2名称:</label>
+                            <input type="text" id="team_name2" name="team_name2" placeholder="请输入战队2名称" value="{{ request.args.get('team_name2', '') }}">
+                        </div>
+                    </div>
+                    <!-- 时间筛选框 -->
+                    <div class="form-item time-range">
+                        <div class="time-item">
+                            <label for="start_date">开始时间:</label>
+                            <input type="month" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
+                        </div>
+                        <div class="time-item">
+                            <label for="end_date">结束时间:</label>
+                            <input type="month" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-submit">
+                    <button type="submit">筛选</button>
+                </div>
+            </form>
+        </div>
+
+        <h2>筛选后的比赛</h2>
+        <ul class="match-list">
+            {% for match in matches.items %}
+            <li>
+                <a href="{{ url_for('match.show_match', match_id=match.match_id) }}"
+                   style="background: linear-gradient(to right, {{ match.red_color }}, {{ match.blue_color }});
+                          color: #fff; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; text-decoration: none;">
+                    <!-- 红队和蓝队在两边 -->
+                    <span class="team red-team">{{ match.red_team_name }}</span>
+
+                    <!-- 中间显示比赛日期（年月日） -->
+                    <span class="match-date">{{ match.date.strftime('%Y-%m-%d') }}</span>
+
+                    <!-- 蓝队在最右边 -->
+                    <span class="team blue-team">{{ match.blue_team_name }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+
+
+
+        <!-- 分页   分页后需要保存战队、时间信息 方便筛选  -->
+        <div class="pagination">
+            {% if matches.has_prev %}
+            <a href="{{ url_for('match.show_matches', page=matches.prev_num, team_name1=request.args.get('team_name1'), team_name2=request.args.get('team_name2'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date')) }}" class="prev">◀︎ 上一页</a>
+            {% endif %}
+
+            {% if matches.page > 3 %}
+            <a href="{{ url_for('match.show_matches', page=1, team_name1=request.args.get('team_name1'), team_name2=request.args.get('team_name2'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date')) }}">1</a>
+            <span class="ellipsis">...</span>
+            {% endif %}
+
+            {% for page_num in range(matches.page - 2, matches.page + 3) %}
+                {% if page_num > 0 and page_num <= matches.pages %}
+                <a href="{{ url_for('match.show_matches', page=page_num, team_name1=request.args.get('team_name1'), team_name2=request.args.get('team_name2'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date')) }}" class="{% if page_num == matches.page %}active{% endif %}">{{ page_num }}</a>
+                {% endif %}
+            {% endfor %}
+
+            {% if matches.page < matches.pages - 2 %}
+            <span class="ellipsis">...</span>
+            <a href="{{ url_for('match.show_matches', page=matches.pages, team_name1=request.args.get('team_name1'), team_name2=request.args.get('team_name2'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date')) }}">{{ matches.pages }}</a>
+            {% endif %}
+
+            {% if matches.has_next %}
+            <a href="{{ url_for('match.show_matches', page=matches.next_num, team_name1=request.args.get('team_name1'), team_name2=request.args.get('team_name2'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date')) }}" class="next">下一页 ▶︎</a>
+            {% endif %}
+        </div>
+
+    </div>
+</body>
+</html>
