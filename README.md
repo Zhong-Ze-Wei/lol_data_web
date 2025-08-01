@@ -74,6 +74,9 @@ python scripts/import_data.py
 ### 5️⃣ 运行项目
 ```bash
 python run.py
+
+cd frontend
+npm run serve
 ```
 默认访问地址为：
 ```
@@ -103,6 +106,7 @@ http://127.0.0.1:5000
  添加搜索、筛选和分页功能
 
  管理后台功能（登录权限等）
+
 
 ---
 

@@ -64,6 +64,7 @@
 
             {% for player in players if player.team_name == red_team.team_name %}
 
+
             <div class="player-card">
                 <img src="{{ player.pic or url_for('static', filename='img/no_photo.png') }}" alt="{{ player.name }}" class="player-pic" width="100" height="100">
                 <h5>{{ player.name }}（{{ position_mapping[player.position] if player.position in position_mapping else player.position }}）</h5>

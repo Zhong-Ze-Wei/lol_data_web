@@ -1,5 +1,4 @@
-from flask import Blueprint, render_template, request
-
+from flask import Blueprint, render_template, request, jsonify
 from app.models.player import Player
 from app.models.match import Match
 from app.models.team import Team
@@ -9,8 +8,9 @@ from app import db
 
 player_bp = Blueprint("player", __name__, url_prefix='/player')
 
-@player_bp.route('/', methods=['GET'])
-def show_players():
+@player_bp.route('/api/list', methods=['GET'])
+def get_players():
+    """获取选手列表API"""
     # 获取请求参数
     team_name = request.args.get('team_name')  # 筛选条件：战队名称
     position = request.args.get('position')    # 筛选条件：分路
@@ -57,16 +57,41 @@ def show_players():
     # 分页
     players = query.paginate(page=page, per_page=24, error_out=False)
 
-    # 返回模板并传递选手数据
-    return render_template('player.html', players=players)
+    # 构造返回数据
+    players_data = []
+    for player in players.items:
+        players_data.append({
+            'name': player.name,
+            'pic': player.pic,
+            'team_name': player.team_name,
+            'position': player.position,
+            'latest_date': player.latest_date.strftime('%Y-%m-%d') if player.latest_date else None
+        })
+
+    return jsonify({
+        'players': players_data,
+        'pagination': {
+            'page': players.page,
+            'pages': players.pages,
+            'has_prev': players.has_prev,
+            'has_next': players.has_next,
+            'prev_num': players.prev_num,
+            'next_num': players.next_num
+        }
+    })
 
 
-@player_bp.route('/<string:name>', methods=['GET'])
-def show_player_matches(name):
+@player_bp.route('/api/<string:name>', methods=['GET'])
+def get_player_matches(name):
+    """获取特定选手比赛记录API"""
+    # 对URL编码的名称进行解码
+    from urllib.parse import unquote
+    name = unquote(name)
+
     # 查找该玩家的所有参赛记录
     players = Player.query.filter_by(name=name).all()
     if not players:
-        return "该玩家未收录", 404
+        return jsonify({'error': '该玩家未收录'}), 404
 
     # 提取所有参与过的 match_id
     match_ids = list(set(player.match_id for player in players))
@@ -76,11 +101,60 @@ def show_player_matches(name):
 
     # 获取所有相关战队数据
     teams = Team.query.filter(Team.match_id.in_(match_ids)).all()
+    
+    # 构造返回数据
+    players_data = []
+    for player in players:
+        players_data.append({
+            'date': player.date.strftime('%Y-%m-%d') if player.date else None,
+            'hero': player.hero,
+            'hero_lv': player.hero_lv,
+            'kda': player.kda,
+            'kills': player.kills,
+            'deaths': player.deaths,
+            'assists': player.assists,
+            'part': player.part,
+            'atk': player.atk,
+            'atk_p': player.atk_p,
+            'atk_m': player.atk_m,
+            'def_': player.def_,
+            'def_p': player.def_p,
+            'def_m': player.def_m,
+            'hits': player.hits,
+            'money': player.money,
+            'result': player.result,
+            'match_id': player.match_id
+        })
+    
+    matches_data = []
+    for match in matches:
+        matches_data.append({
+            'match_id': match.match_id,
+            'date': match.date.strftime('%Y-%m-%d') if match.date else None,
+            'game_time': match.game_time,
+            'red_team_name': match.red_team_name,
+            'blue_team_name': match.blue_team_name,
+            'win_team_name': match.win_team_name,
+            'mvp': match.mvp
+        })
+    
+    teams_data = []
+    for team in teams:
+        teams_data.append({
+            'match_id': team.match_id,
+            'team_name': team.team_name,
+            'team_flag': team.team_flag,
+            'result': team.result,
+            'kill': team.kill,
+            'death': team.death,
+            'assist': team.assist,
+            'money': team.money,
+            'tower': team.tower
+        })
 
-    return render_template(
-        'player_detail.html',
-        name=name,
-        players=players,
-        matches=matches,
-        teams=teams
-    )
+    return jsonify({
+        'name': name,
+        'players': players_data,
+        'matches': matches_data,
+        'teams': teams_data
+    })
