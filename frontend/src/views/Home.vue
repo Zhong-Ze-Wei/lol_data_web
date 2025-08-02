@@ -141,7 +141,7 @@
     <el-row :gutter="20" class="about-section">
       <el-col :span="24">
         <el-card class="about-card" shadow="hover">
-          <a href="https://github.com/Zhong-Ze-We" target="_blank" class="about-link">
+          <a href="https://github.com/Zhong-Ze-Wei" target="_blank" class="about-link">
             <el-image
               :src="require('@/assets/my_photo.jpg')"
               class="about-image"
