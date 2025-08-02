@@ -3,7 +3,7 @@ from app import db
 from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
-from sqlalchemy import func, desc, case
+from sqlalchemy import func, desc, case, asc
 import openai
 import os
 from dotenv import load_dotenv
@@ -112,5 +112,41 @@ def fastest_matches():
         } for match in fastest]
         
         return jsonify({'matches': matches_data, 'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+
+# 添加最长比赛时间的TOP3
+@main_bp.route('/longest-matches')
+def longest_matches():
+    try:
+        # 获取结束最慢的战斗TOP3
+        longest = db.session.query(Match).filter(Match.game_time.isnot(None)).order_by(desc(Match.game_time)).limit(3).all()
+        
+        matches_data = [{
+            'id': match.id,
+            'red_team_name': match.red_team_name,
+            'blue_team_name': match.blue_team_name,
+            'game_time': match.game_time
+        } for match in longest]
+        
+        return jsonify({'matches': matches_data, 'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+
+# 添加单场击杀最多的三名选手
+@main_bp.route('/top-kills')
+def top_kills():
+    try:
+        # 获取单场击杀数最高的TOP3选手
+        top_killers = db.session.query(Player).filter(Player.kills.isnot(None)).order_by(desc(Player.kills)).limit(3).all()
+        
+        players_data = [{
+            'name': player.name,
+            'hero': player.hero,
+            'kills': player.kills,
+            'team_name': player.team_name
+        } for player in top_killers]
+        
+        return jsonify({'players': players_data, 'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})

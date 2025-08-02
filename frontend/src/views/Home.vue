@@ -96,7 +96,37 @@
                 >
                   <div class="rank">{{ index + 1 }}</div>
                   <div class="name">{{ match.blue_team_name }} vs {{ match.red_team_name }}</div>
-                  <div class="value">{{ formatGameTime(match.game_time) }}</div>
+                  <div class="value">{{ formatGameTime(match.game_time) }}<br><small>{{ formatDate(match.date) }}</small></div>
+                </div>
+              </div>
+            </el-tab-pane>
+            <!-- 新增最长比赛时间TOP3 -->
+            <el-tab-pane label="最长比赛">
+              <div class="fun-data-list">
+                <div 
+                  v-for="(match, index) in longestMatches" 
+                  :key="match.id"
+                  class="fun-data-item"
+                  :class="getRankClass(index)"
+                >
+                  <div class="rank">{{ index + 1 }}</div>
+                  <div class="name">{{ match.blue_team_name }} vs {{ match.red_team_name }}</div>
+                  <div class="value">{{ formatGameTime(match.game_time) }}<br><small>{{ formatDate(match.date) }}</small></div>
+                </div>
+              </div>
+            </el-tab-pane>
+            <!-- 新增单场击杀最多选手TOP3 -->
+            <el-tab-pane label="击杀榜">
+              <div class="fun-data-list">
+                <div 
+                  v-for="(player, index) in topKills" 
+                  :key="player.name"
+                  class="fun-data-item"
+                  :class="getRankClass(index)"
+                >
+                  <div class="rank">{{ index + 1 }}</div>
+                  <div class="name">{{ player.name }} ({{ player.team_name }})</div>
+                  <div class="value">{{ player.kills }} 杀 ({{ player.hero }})</div>
                 </div>
               </div>
             </el-tab-pane>
@@ -195,6 +225,9 @@ export default {
       topPlayers: [],
       topTeams: [],
       fastestMatches: [],
+      // 新增数据
+      longestMatches: [],
+      topKills: [],
       stats: {
         matches: 0,
         players: 0,
@@ -260,6 +293,20 @@ export default {
         if (matchesResult.status === 'success') {
           this.fastestMatches = matchesResult.matches || [];
         }
+
+        // 获取结束最慢的战斗TOP3（新增）
+        const longestMatchesResponse = await fetch('/api/longest-matches');
+        const longestMatchesResult = await longestMatchesResponse.json();
+        if (longestMatchesResult.status === 'success') {
+          this.longestMatches = longestMatchesResult.matches || [];
+        }
+
+        // 获取单场击杀数最高的TOP3选手（新增）
+        const topKillsResponse = await fetch('/api/top-kills');
+        const topKillsResult = await topKillsResponse.json();
+        if (topKillsResult.status === 'success') {
+          this.topKills = topKillsResult.players || [];
+        }
       } catch (error) {
         console.error('获取趣味数据失败:', error);
       }
@@ -320,6 +367,12 @@ export default {
       const minutes = Math.floor(seconds / 60);
       const secs = seconds % 60;
       return `${minutes}分${secs}秒`;
+    },
+    
+    formatDate(dateString) {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
     }
   }
 }
