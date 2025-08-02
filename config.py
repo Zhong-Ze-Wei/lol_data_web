@@ -1,13 +1,17 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 LOG_DIR = 'logs/'
 PROXY = None
 SPIDER_DEBUG = True
 
 class Config:
-    # 数据库配置
-    SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:123456@localhost/lol_data'
+    SQLALCHEMY_DATABASE_URI = (
+        f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    
-    # 其他配置项
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key-here'
+    SECRET_KEY = os.getenv('SECRET_KEY') or 'your-secret-key-here'
