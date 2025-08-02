@@ -7,7 +7,9 @@
           <div slot="header" class="welcome-header">
             <h2>🏆 所有战队</h2>
           </div>
-          <p class="welcome-text">在这里您可以查看所有参与职业赛事的战队信息，了解他们的成员构成和战绩表现。</p>
+          <p class="welcome-text">
+            在这里您可以查看所有参与职业赛事的战队信息，了解他们的成员构成和战绩表现。
+          </p>
         </el-card>
       </el-col>
     </el-row>
@@ -16,17 +18,14 @@
     <div class="filter-form">
       <el-form :inline="true" :model="filterForm" class="filter-form-inline">
         <div class="form-row">
-          <div class="form-group">
-            <el-form-item label="战队名称">
-              <el-input
-                v-model="filterForm.team_name"
-                placeholder="请输入战队名称"
-                clearable
-              />
-            </el-form-item>
-          </div>
+          <el-form-item label="战队名称">
+            <el-input
+              v-model="filterForm.team_name"
+              placeholder="请输入战队名称"
+              clearable
+            />
+          </el-form-item>
         </div>
-
         <el-form-item>
           <el-button type="primary" @click="fetchTeams">筛选</el-button>
         </el-form-item>
@@ -34,17 +33,16 @@
     </div>
 
     <!-- 战队列表 -->
-    <div class="team-list" v-loading="loading">
+    <div class="team-grid">
       <el-card
         v-for="team in teams"
         :key="team.id"
         class="team-card"
         @click.native="goToTeamDetail(team.team_name)"
-        shadow="hover"
       >
         <div class="team-card-content">
           <div class="team-info">
-            <div class="team-name">{{ team.team_name }}</div>
+            <h3>{{ team.team_name }}</h3>
           </div>
         </div>
       </el-card>
@@ -86,7 +84,6 @@ export default {
   },
   methods: {
     async fetchTeams() {
-      // 添加加载状态
       this.loading = true;
       try {
         const params = new URLSearchParams();
@@ -95,7 +92,6 @@ export default {
         }
         params.append('page', this.pagination.page);
 
-        // 修改API端点以获取不重复的战队列表
         const response = await fetch(`/team/api/distinct?${params.toString()}`);
         const data = await response.json();
 
@@ -118,7 +114,7 @@ export default {
       this.fetchTeams();
     },
     goToTeamDetail(teamName) {
-      this.$router.push(`/team/${teamName}`);
+      this.$router.push(`/team/${encodeURIComponent(teamName)}`);
     }
   }
 }
@@ -173,50 +169,34 @@ export default {
   gap: 20px;
 }
 
-.form-group {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.team-list {
+.team-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 20px;
   margin-bottom: 30px;
-  min-height: 400px;
 }
 
 .team-card {
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
-  border-radius: 15px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .team-card:hover {
   transform: translateY(-5px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
 }
 
 .team-card-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 30px 20px;
-}
-
-.team-info {
   text-align: center;
-  padding: 0 20px;
-  width: 100%;
+  padding: 40px 20px;
+  background: linear-gradient(120deg, #ffffff, #f8f9ff);
 }
 
-.team-name {
+.team-info h3 {
   font-size: 20px;
-  font-weight: bold;
+  font-weight: 600;
   color: #333;
 }
 
@@ -224,5 +204,71 @@ export default {
   display: flex;
   justify-content: center;
   margin-top: 30px;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .team-list-container {
+    padding: 10px;
+  }
+
+  .welcome-card {
+    margin-bottom: 15px;
+  }
+
+  .welcome-header {
+    padding: 12px 15px;
+  }
+
+  .welcome-header h2 {
+    font-size: 20px;
+  }
+
+  .welcome-text {
+    font-size: 14px;
+    margin: 15px 0;
+    padding: 0 10px;
+  }
+
+  .filter-form {
+    padding: 15px;
+    margin-bottom: 20px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .team-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100%, 1fr));
+    gap: 15px;
+  }
+
+  .team-info h3 {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .welcome-header h2 {
+    font-size: 18px;
+  }
+
+  .welcome-text {
+    font-size: 13px;
+  }
+
+  .filter-form {
+    padding: 10px;
+  }
+
+  .team-grid {
+    gap: 10px;
+  }
+
+  .team-info h3 {
+    font-size: 14px;
+  }
 }
 </style>

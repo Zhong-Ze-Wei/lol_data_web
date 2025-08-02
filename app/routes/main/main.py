@@ -18,7 +18,7 @@ from . import root_bp
 
 @root_bp.route('/')
 def home():
-    return render_template('index.html')
+    return "请通过 Nginx 访问前端页面"
 
 @main_bp.route('/recent-matches')
 def recent_matches():
@@ -52,5 +52,65 @@ def stats():
             },
             'status': 'success'
         })
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+
+@main_bp.route('/top-players')
+def top_players():
+    try:
+        # 获取参赛场次最多的选手TOP3
+        top_players = db.session.query(
+            Player.name,
+            func.count(Player.match_id).label('matches_count')
+        ).group_by(Player.name).order_by(desc('matches_count')).limit(3).all()
+        
+        players_data = [{
+            'name': player.name,
+            'matches_count': player.matches_count
+        } for player in top_players]
+        
+        return jsonify({'players': players_data, 'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+
+@main_bp.route('/top-teams')
+def top_teams():
+    try:
+        # 获取胜率最高的战队TOP3（排除少于50场数据的战队）
+        team_stats = db.session.query(
+            Team.team_name,
+            func.count(Team.id).label('total_matches'),
+            func.sum(case((Team.result == 1, 1), else_=0)).label('wins')
+        ).group_by(Team.team_name).having(func.count(Team.id) >= 50).all()
+        
+        teams_with_win_rate = []
+        for team in team_stats:
+            win_rate = (team.wins / team.total_matches) * 100
+            teams_with_win_rate.append({
+                'team_name': team.team_name,
+                'win_rate': round(win_rate, 2)
+            })
+        
+        # 按胜率排序并取前3名
+        top_teams = sorted(teams_with_win_rate, key=lambda x: x['win_rate'], reverse=True)[:3]
+        
+        return jsonify({'teams': top_teams, 'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+
+@main_bp.route('/fastest-matches')
+def fastest_matches():
+    try:
+        # 获取结束最快的战斗TOP3
+        fastest = db.session.query(Match).filter(Match.game_time.isnot(None)).order_by(asc(Match.game_time)).limit(3).all()
+        
+        matches_data = [{
+            'id': match.id,
+            'red_team_name': match.red_team_name,
+            'blue_team_name': match.blue_team_name,
+            'game_time': match.game_time
+        } for match in fastest]
+        
+        return jsonify({'matches': matches_data, 'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})

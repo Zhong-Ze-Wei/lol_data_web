@@ -130,4 +130,62 @@ export default {
   color: #7a8b9c; /* 柔和的页脚文字颜色 */
   background: rgba(255, 255, 255, 0.5); /* 淡化页脚背景 */
 }
+
+/* 移动端适配 */
+@media screen and (max-width: 768px) {
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .logo {
+    font-size: 20px;
+    margin-bottom: 10px;
+  }
+  
+  .custom-menu {
+    width: 100%;
+    overflow-x: auto;
+  }
+  
+  .custom-menu .el-menu-item {
+    font-size: 14px;
+    padding: 0 10px;
+  }
+  
+  .main {
+    padding: 15px;
+    margin: 10px;
+    border-radius: 5px;
+  }
+  
+  .footer {
+    padding: 10px;
+    font-size: 12px;
+  }
+  
+  .footer p {
+    margin: 0;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .header {
+    padding: 10px;
+  }
+  
+  .logo {
+    font-size: 18px;
+  }
+  
+  .main {
+    padding: 10px;
+    margin: 5px;
+  }
+  
+  .custom-menu .el-menu-item {
+    font-size: 12px;
+    padding: 0 8px;
+  }
+}
 </style>

@@ -1,4 +1,3 @@
-<!-- frontend/src/views/Home.vue -->
 <template>
   <div class="home-container">
     <!-- 标题和欢迎信息 -->
@@ -50,33 +49,58 @@
       </el-col>
     </el-row>
 
-    <!-- 数据区域 - 最近比赛和AI查询放在同一行 -->
+    <!-- 数据区域 - 趣味数据和AI查询放在同一行 -->
     <el-row :gutter="20" class="data-section">
-      <!-- 最近比赛 - 左侧 -->
+      <!-- 趣味数据 - 左侧 -->
       <el-col :span="16">
         <el-card class="data-card" shadow="hover">
           <div slot="header" class="data-header">
-            <span class="section-title">⚔️ 最近比赛</span>
-            <el-button type="text" @click="goToMatches" class="more-button">查看更多 ></el-button>
+            <span class="section-title">📊 趣味数据</span>
           </div>
-          <el-table :data="recentMatches" style="width: 100%" stripe>
-            <el-table-column prop="blue_team" label="蓝队">
-              <template slot-scope="scope">
-                <span class="team-name blue-team">{{ scope.row.blue_team }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="red_team" label="红队">
-              <template slot-scope="scope">
-                <span class="team-name red-team">{{ scope.row.red_team }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="winner" label="获胜方">
-              <template slot-scope="scope">
-                <span class="winner-tag" :class="getWinnerClass(scope.row)">{{ scope.row.winner }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="duration" label="时长" />
-          </el-table>
+          <el-tabs type="border-card">
+            <el-tab-pane label="选手参赛榜">
+              <div class="fun-data-list">
+                <div 
+                  v-for="(player, index) in topPlayers" 
+                  :key="player.name"
+                  class="fun-data-item"
+                  :class="getRankClass(index)"
+                >
+                  <div class="rank">{{ index + 1 }}</div>
+                  <div class="name">{{ player.name }}</div>
+                  <div class="value">{{ player.matches_count }} 场</div>
+                </div>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="战队胜率榜">
+              <div class="fun-data-list">
+                <div 
+                  v-for="(team, index) in topTeams" 
+                  :key="team.team_name"
+                  class="fun-data-item"
+                  :class="getRankClass(index)"
+                >
+                  <div class="rank">{{ index + 1 }}</div>
+                  <div class="name">{{ team.team_name }}</div>
+                  <div class="value">{{ team.win_rate }}%</div>
+                </div>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="最快比赛">
+              <div class="fun-data-list">
+                <div 
+                  v-for="(match, index) in fastestMatches" 
+                  :key="match.id"
+                  class="fun-data-item"
+                  :class="getRankClass(index)"
+                >
+                  <div class="rank">{{ index + 1 }}</div>
+                  <div class="name">{{ match.blue_team_name }} vs {{ match.red_team_name }}</div>
+                  <div class="value">{{ formatGameTime(match.game_time) }}</div>
+                </div>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
         </el-card>
       </el-col>
       
@@ -168,7 +192,9 @@ export default {
   name: 'Home',
   data() {
     return {
-      recentMatches: [],
+      topPlayers: [],
+      topTeams: [],
+      fastestMatches: [],
       stats: {
         matches: 0,
         players: 0,
@@ -183,7 +209,7 @@ export default {
     };
   },
   mounted() {
-    this.fetchRecentMatches();
+    this.fetchFunData();
     this.fetchStats();
   },
   methods: {
@@ -212,18 +238,30 @@ export default {
         this.aiLoading = false;
       }, 1500);
     },
-    async fetchRecentMatches() {
+    async fetchFunData() {
       try {
-        const response = await fetch('/api/recent-matches');
-        const result = await response.json();
+        // 获取参赛最多的选手TOP3
+        const playersResponse = await fetch('/api/top-players');
+        const playersResult = await playersResponse.json();
+        if (playersResult.status === 'success') {
+          this.topPlayers = playersResult.players || [];
+        }
 
-        if (result.status === 'success') {
-          this.recentMatches = result.matches || [];
-        } else {
-          console.error('获取最近比赛失败:', result.msg);
+        // 获取胜率最高的战队TOP3
+        const teamsResponse = await fetch('/api/top-teams');
+        const teamsResult = await teamsResponse.json();
+        if (teamsResult.status === 'success') {
+          this.topTeams = teamsResult.teams || [];
+        }
+
+        // 获取结束最快的战斗TOP3
+        const matchesResponse = await fetch('/api/fastest-matches');
+        const matchesResult = await matchesResponse.json();
+        if (matchesResult.status === 'success') {
+          this.fastestMatches = matchesResult.matches || [];
         }
       } catch (error) {
-        console.error('获取最近比赛失败:', error);
+        console.error('获取趣味数据失败:', error);
       }
     },
     async fetchStats() {
@@ -271,13 +309,17 @@ export default {
     getFullNumber(num) {
       return num.toLocaleString();
     },
-    getWinnerClass(row) {
-      if (row.winner === row.blue_team) {
-        return 'blue-winner';
-      } else if (row.winner === row.red_team) {
-        return 'red-winner';
-      }
+    getRankClass(index) {
+      if (index === 0) return 'first';
+      if (index === 1) return 'second';
+      if (index === 2) return 'third';
       return '';
+    },
+    formatGameTime(seconds) {
+      if (!seconds) return '';
+      const minutes = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${minutes}分${secs}秒`;
     }
   }
 }
@@ -384,38 +426,70 @@ export default {
   font-weight: 600;
 }
 
-.more-button {
-  color: #fff !important;
+.fun-data-list {
+  padding: 20px 0;
+}
+
+.fun-data-item {
+  display: flex;
+  align-items: center;
+  padding: 15px 20px;
+  margin-bottom: 15px;
+  border-radius: 8px;
+  background: #f8f9fa;
+  transition: all 0.3s;
+}
+
+.fun-data-item:hover {
+  background: #e9ecef;
+  transform: translateX(5px);
+}
+
+.fun-data-item.first {
+  background: linear-gradient(90deg, #fff8e1, #ffecb3);
+  border-left: 5px solid #ffc107;
+}
+
+.fun-data-item.second {
+  background: linear-gradient(90deg, #e3f2fd, #bbdefb);
+  border-left: 5px solid #2196f3;
+}
+
+.fun-data-item.third {
+  background: linear-gradient(90deg, #fce4ec, #f8bbd0);
+  border-left: 5px solid #e91e63;
+}
+
+.fun-data-item .rank {
+  font-size: 20px;
+  font-weight: bold;
+  width: 30px;
+  color: #6c757d;
+}
+
+.fun-data-item.first .rank {
+  color: #ffc107;
+}
+
+.fun-data-item.second .rank {
+  color: #2196f3;
+}
+
+.fun-data-item.third .rank {
+  color: #e91e63;
+}
+
+.fun-data-item .name {
+  flex: 1;
+  font-size: 16px;
   font-weight: 500;
+  color: #495057;
 }
 
-.team-name {
-  font-weight: 500;
-}
-
-.blue-team {
+.fun-data-item .value {
+  font-size: 16px;
+  font-weight: bold;
   color: #4361ee;
-}
-
-.red-team {
-  color: #f72585;
-}
-
-.winner-tag {
-  padding: 4px 10px;
-  border-radius: 15px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.blue-winner {
-  background-color: rgba(67, 97, 238, 0.2);
-  color: #4361ee;
-}
-
-.red-winner {
-  background-color: rgba(247, 37, 133, 0.2);
-  color: #f72585;
 }
 
 /* AI查询窗口样式 */

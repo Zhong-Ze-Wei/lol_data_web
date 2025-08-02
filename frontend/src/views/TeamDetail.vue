@@ -3,8 +3,20 @@
     <el-page-header @back="goBack" content="战队详情"></el-page-header>
 
     <div v-if="!loading && team">
-      <div class="team-header">
-        <h2 class="team-title">{{ team.team_name }}</h2>
+      <!-- 标题和欢迎信息 -->
+      <el-row :gutter="20">
+        <el-col :span="24">
+          <el-card class="welcome-card" shadow="hover">
+            <div slot="header" class="welcome-header">
+              <h2>🏆 战队详情</h2>
+            </div>
+            <p class="welcome-text">{{ team.team_name }} 的详细信息和战队成员列表。</p>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <div class="page-header">
+        <h1 class="page-title">{{ team.team_name }}</h1>
       </div>
 
       <el-row :gutter="20" class="team-info-container">
@@ -166,6 +178,34 @@ export default {
   margin: 0 auto;
 }
 
+.welcome-card {
+  margin-bottom: 20px;
+  border-radius: 15px;
+  background: linear-gradient(120deg, #ffffff, #f8f9ff);
+  border: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+}
+
+.welcome-header {
+  background: linear-gradient(90deg, #4361ee, #3a0ca3);
+  color: white;
+  border-radius: 8px 8px 0 0;
+  padding: 15px 20px;
+}
+
+.welcome-header h2 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.welcome-text {
+  font-size: 16px;
+  color: #555;
+  line-height: 1.6;
+  margin: 20px 0;
+  padding: 0 15px;
+}
+
 .team-header {
   text-align: center;
   margin-bottom: 30px;
@@ -265,5 +305,92 @@ export default {
 
 .player-name:hover {
   text-decoration: underline;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .team-detail-container {
+    padding: 10px;
+  }
+  
+  .welcome-card {
+    margin-bottom: 15px;
+    border-radius: 10px;
+  }
+  
+  .welcome-header {
+    padding: 12px 15px;
+  }
+  
+  .welcome-header h2 {
+    font-size: 20px;
+  }
+  
+  .welcome-text {
+    font-size: 14px;
+    margin: 15px 0;
+    padding: 0 10px;
+  }
+  
+  .team-header {
+    padding: 15px;
+    margin-bottom: 20px;
+  }
+  
+  .team-title {
+    font-size: 24px;
+  }
+  
+  .team-basic-info {
+    padding: 15px;
+  }
+  
+  .team-basic-info p {
+    font-size: 14px;
+  }
+  
+  .team-logo {
+    width: 150px;
+    height: 150px;
+  }
+  
+  .image-slot {
+    width: 150px;
+    height: 150px;
+    font-size: 36px;
+  }
+}
+
+@media (max-width: 480px) {
+  .welcome-header h2 {
+    font-size: 18px;
+  }
+  
+  .welcome-text {
+    font-size: 13px;
+  }
+  
+  .team-title {
+    font-size: 20px;
+  }
+  
+  .team-basic-info {
+    padding: 10px;
+  }
+  
+  .team-basic-info p {
+    font-size: 13px;
+  }
+  
+  .team-logo {
+    width: 120px;
+    height: 120px;
+  }
+  
+  .image-slot {
+    width: 120px;
+    height: 120px;
+    font-size: 28px;
+  }
 }
 </style>
