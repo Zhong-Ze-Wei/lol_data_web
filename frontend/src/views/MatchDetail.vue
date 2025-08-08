@@ -3,26 +3,15 @@
     <el-page-header @back="goBack" :content="matchTitle"></el-page-header>
 
     <div v-if="!loading && match">
-      <!-- 标题和欢迎信息 -->
-      <el-row :gutter="20">
-        <el-col :span="24">
-          <el-card class="welcome-card" shadow="hover">
-            <div slot="header" class="welcome-header">
-              <h2>⚔️ 比赛详情</h2>
-            </div>
-            <p class="welcome-text">这场比赛的详细数据和选手表现统计。</p>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <div class="page-header">
-        <h1 class="page-title">{{ match.red_team_name }} vs {{ match.blue_team_name }}</h1>
-        <p class="match-info">{{ match.date }} | 比赛时长: {{ formatGameTime(match.game_time) }} | MVP: {{ match.mvp }}</p>
+      <div class="match-header">
+        <h2 class="match-title">{{ match.red_team_name }} vs {{ match.blue_team_name }}</h2>
+        <p class="match-date">{{ match.date }}</p>
+        <p class="match-duration">比赛时长: {{ formatGameTime(match.game_time) }} | MVP: {{ match.mvp }}</p>
       </div>
 
       <el-row :gutter="20" class="teams-container">
         <!-- 红方 -->
-        <el-col :span="24" :md="12">
+        <el-col :span="12">
           <el-card class="team-card red-team">
             <div slot="header" class="team-header">
               <h3>{{ redTeam.team_name }} 选手</h3>
@@ -30,10 +19,10 @@
 
             <div class="team-stats">
               <el-row>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>总击杀:</strong> {{ redTeam.kill }} | <strong>总死亡:</strong> {{ redTeam.death }}</p>
                 </el-col>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>经济:</strong> {{ redTeam.money }} | <strong>推塔:</strong> {{ redTeam.tower }}</p>
                 </el-col>
               </el-row>
@@ -45,7 +34,7 @@
               class="player-card"
             >
               <el-row>
-                <el-col :span="8" :md="6">
+                <el-col :span="6">
                   <el-image
                     :src="player.pic || noPhotoImage"
                     class="player-img clickable"
@@ -57,7 +46,7 @@
                     </div>
                   </el-image>
                 </el-col>
-                <el-col :span="16" :md="18">
+                <el-col :span="18">
                   <h4 class="clickable" @click="goToPlayerDetail(player.name)">{{ player.name }}（{{ positionMapping[player.position] }}）</h4>
                   <p><strong>英雄:</strong> {{ player.hero }}（等级: {{ player.hero_lv }}）</p>
                   <p><strong>KDA:</strong> {{ player.kda }}（{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}） | <strong>参团率:</strong> {{ player.part }}</p>
@@ -71,7 +60,7 @@
         </el-col>
 
         <!-- 蓝方 -->
-        <el-col :span="24" :md="12">
+        <el-col :span="12">
           <el-card class="team-card blue-team">
             <div slot="header" class="team-header">
               <h3>{{ blueTeam.team_name }} 选手</h3>
@@ -79,10 +68,10 @@
 
             <div class="team-stats">
               <el-row>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>总击杀:</strong> {{ blueTeam.kill }} | <strong>总死亡:</strong> {{ blueTeam.death }}</p>
                 </el-col>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>经济:</strong> {{ blueTeam.money }} | <strong>推塔:</strong> {{ blueTeam.tower }}</p>
                 </el-col>
               </el-row>
@@ -94,7 +83,7 @@
               class="player-card"
             >
               <el-row>
-                <el-col :span="8" :md="6">
+                <el-col :span="6">
                   <el-image
                     :src="player.pic || noPhotoImage"
                     class="player-img clickable"
@@ -106,7 +95,7 @@
                     </div>
                   </el-image>
                 </el-col>
-                <el-col :span="16" :md="18">
+                <el-col :span="18">
                   <h4 class="clickable" @click="goToPlayerDetail(player.name)">{{ player.name }}（{{ positionMapping[player.position] }}）</h4>
                   <p><strong>英雄:</strong> {{ player.hero }}（等级: {{ player.hero_lv }}）</p>
                   <p><strong>KDA:</strong> {{ player.kda }}（{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}） | <strong>参团率:</strong> {{ player.part }}</p>
@@ -208,34 +197,6 @@ export default {
   margin: 0 auto;
 }
 
-.welcome-card {
-  margin-bottom: 20px;
-  border-radius: 15px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
-}
-
-.welcome-header {
-  background: linear-gradient(90deg, #4361ee, #3a0ca3);
-  color: white;
-  border-radius: 8px 8px 0 0;
-  padding: 15px 20px;
-}
-
-.welcome-header h2 {
-  margin: 0;
-  font-weight: 600;
-}
-
-.welcome-text {
-  font-size: 16px;
-  color: #555;
-  line-height: 1.6;
-  margin: 20px 0;
-  padding: 0 15px;
-}
-
 .match-header {
   text-align: center;
   margin-bottom: 30px;
@@ -315,97 +276,5 @@ export default {
 .clickable:hover {
   color: #409EFF;
   text-decoration: underline;
-}
-
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .match-detail-container {
-    padding: 10px;
-  }
-  
-  .welcome-card {
-    margin-bottom: 15px;
-    border-radius: 10px;
-  }
-  
-  .welcome-header {
-    padding: 12px 15px;
-  }
-  
-  .welcome-header h2 {
-    font-size: 20px;
-  }
-  
-  .welcome-text {
-    font-size: 14px;
-    margin: 15px 0;
-    padding: 0 10px;
-  }
-  
-  .match-title {
-    font-size: 20px;
-  }
-  
-  .player-card {
-    padding: 10px;
-  }
-  
-  .player-img {
-    width: 60px;
-    height: 60px;
-    font-size: 24px;
-  }
-  
-  .team-stats p {
-    font-size: 14px;
-  }
-  
-  .player-card h4 {
-    font-size: 16px;
-  }
-  
-  .player-card p {
-    font-size: 13px;
-  }
-}
-
-@media (max-width: 480px) {
-  .welcome-header h2 {
-    font-size: 18px;
-  }
-  
-  .welcome-text {
-    font-size: 13px;
-  }
-  
-  .match-title {
-    font-size: 18px;
-  }
-  
-  .match-date, .match-duration {
-    font-size: 14px;
-  }
-  
-  .player-card {
-    padding: 8px;
-  }
-  
-  .player-img {
-    width: 50px;
-    height: 50px;
-    font-size: 20px;
-  }
-  
-  .team-stats p {
-    font-size: 13px;
-  }
-  
-  .player-card h4 {
-    font-size: 15px;
-  }
-  
-  .player-card p {
-    font-size: 12px;
-  }
 }
 </style>

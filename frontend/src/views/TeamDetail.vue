@@ -25,14 +25,14 @@
             <div slot="header" class="stats-header">
               <h3>基本信息</h3>
             </div>
-            
+
             <div class="team-basic-info">
               <el-row>
                 <el-col :span="12">
                   <p><strong>战队名称:</strong> {{ team.team_name }}</p>
                 </el-col>
               </el-row>
-              
+
               <el-row>
                 <el-col :span="12">
                   <p><strong>比赛场次:</strong> {{ team.matches_count }}</p>
@@ -50,7 +50,7 @@
             <div slot="header" class="logo-header">
               <h3>战队Logo</h3>
             </div>
-            
+
             <div class="team-logo-container">
               <el-image
                 :src="team.logo || noPhotoImage"
@@ -72,7 +72,7 @@
             <div slot="header" class="detailed-stats-header">
               <h3>战队成员</h3>
             </div>
-            
+
             <el-table :data="team.players" style="width: 100%" stripe>
               <el-table-column prop="player_name" label="选手名称">
                 <template slot-scope="scope">
@@ -88,9 +88,9 @@
               </el-table-column>
               <el-table-column label="操作" width="120">
                 <template slot-scope="scope">
-                  <el-button 
-                    size="mini" 
-                    type="primary" 
+                  <el-button
+                    size="mini"
+                    type="primary"
                     @click="goToPlayerDetail(scope.row.player_name)"
                   >
                     查看详情
@@ -312,48 +312,48 @@ export default {
   .team-detail-container {
     padding: 10px;
   }
-  
+
   .welcome-card {
     margin-bottom: 15px;
     border-radius: 10px;
   }
-  
+
   .welcome-header {
     padding: 12px 15px;
   }
-  
+
   .welcome-header h2 {
     font-size: 20px;
   }
-  
+
   .welcome-text {
     font-size: 14px;
     margin: 15px 0;
     padding: 0 10px;
   }
-  
+
   .team-header {
     padding: 15px;
     margin-bottom: 20px;
   }
-  
+
   .team-title {
     font-size: 24px;
   }
-  
+
   .team-basic-info {
     padding: 15px;
   }
-  
+
   .team-basic-info p {
     font-size: 14px;
   }
-  
+
   .team-logo {
     width: 150px;
     height: 150px;
   }
-  
+
   .image-slot {
     width: 150px;
     height: 150px;
@@ -365,28 +365,28 @@ export default {
   .welcome-header h2 {
     font-size: 18px;
   }
-  
+
   .welcome-text {
     font-size: 13px;
   }
-  
+
   .team-title {
     font-size: 20px;
   }
-  
+
   .team-basic-info {
     padding: 10px;
   }
-  
+
   .team-basic-info p {
     font-size: 13px;
   }
-  
+
   .team-logo {
     width: 120px;
     height: 120px;
   }
-  
+
   .image-slot {
     width: 120px;
     height: 120px;

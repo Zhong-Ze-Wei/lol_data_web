@@ -1,16 +1,6 @@
 <template>
   <div class="match-list-container">
-    <!-- 标题和欢迎信息 -->
-    <el-row :gutter="20">
-      <el-col :span="24">
-        <el-card class="welcome-card" shadow="hover">
-          <div slot="header" class="welcome-header">
-            <h2>⚔️ 所有比赛</h2>
-          </div>
-          <p class="welcome-text">在这里您可以查看所有职业比赛的记录，通过筛选条件查找您感兴趣的比赛。</p>
-        </el-card>
-      </el-col>
-    </el-row>
+    <h1>所有比赛</h1>
 
     <!-- 筛选表单 -->
     <div class="filter-form">
@@ -180,40 +170,11 @@ export default {
   margin: 0 auto;
 }
 
-.welcome-card {
-  margin-bottom: 20px;
-  border-radius: 15px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
-}
-
-.welcome-header {
-  background: linear-gradient(90deg, #4361ee, #3a0ca3);
-  color: white;
-  border-radius: 8px 8px 0 0;
-  padding: 15px 20px;
-}
-
-.welcome-header h2 {
-  margin: 0;
-  font-weight: 600;
-}
-
-.welcome-text {
-  font-size: 16px;
-  color: #555;
-  line-height: 1.6;
-  margin: 20px 0;
-  padding: 0 15px;
-}
-
 .filter-form {
   background: #f5f7fa;
   padding: 20px;
   border-radius: 8px;
   margin-bottom: 30px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .form-row {
@@ -281,95 +242,5 @@ export default {
   display: flex;
   justify-content: center;
   margin-top: 30px;
-}
-
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .match-list-container {
-    padding: 10px;
-  }
-  
-  .welcome-card {
-    margin-bottom: 15px;
-    border-radius: 10px;
-  }
-  
-  .welcome-header {
-    padding: 12px 15px;
-  }
-  
-  .welcome-header h2 {
-    font-size: 20px;
-  }
-  
-  .welcome-text {
-    font-size: 14px;
-    margin: 15px 0;
-    padding: 0 10px;
-  }
-  
-  .filter-form {
-    padding: 15px;
-    margin-bottom: 20px;
-  }
-  
-  .form-row {
-    gap: 10px;
-  }
-  
-  .form-group {
-    gap: 10px;
-    flex-direction: column;
-  }
-  
-  .match-list {
-    grid-template-columns: repeat(auto-fill, minmax(100%, 1fr));
-    gap: 15px;
-  }
-  
-  .match-card-content {
-    padding: 15px;
-  }
-  
-  .team {
-    font-size: 16px;
-  }
-  
-  .match-date {
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .welcome-header h2 {
-    font-size: 18px;
-  }
-  
-  .welcome-text {
-    font-size: 13px;
-  }
-  
-  .filter-form {
-    padding: 10px;
-  }
-  
-  .match-list {
-    gap: 10px;
-  }
-  
-  .match-card-content {
-    padding: 10px;
-    flex-direction: column;
-    gap: 10px;
-  }
-  
-  .team {
-    font-size: 14px;
-    text-align: center !important;
-  }
-  
-  .match-info {
-    padding: 0;
-  }
 }
 </style>

@@ -13,7 +13,7 @@
       </div>
 
       <el-row :gutter="20" class="hero-info-container">
-        <el-col :span="24" :md="12">
+        <el-col :span="12">
           <el-card class="hero-stats-card">
             <div slot="header" class="stats-header">
               <h3>基础信息</h3>
@@ -21,19 +21,19 @@
             
             <div class="hero-basic-info">
               <el-row>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>英雄名称:</strong> {{ hero.hero_name }}</p>
                 </el-col>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>位置:</strong> {{ positionMapping[hero.position] }}</p>
                 </el-col>
               </el-row>
               
               <el-row>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>出场次数:</strong> {{ hero.matches_count }}</p>
                 </el-col>
-                <el-col :span="24" :md="12">
+                <el-col :span="12">
                   <p><strong>胜率:</strong> 
                     <el-tag :type="getWinRateTagType(hero.win_rate)">
                       {{ hero.win_rate }}%
@@ -45,7 +45,7 @@
           </el-card>
         </el-col>
 
-        <el-col :span="24" :md="12">
+        <el-col :span="12">
           <el-card class="hero-image-card">
             <div slot="header" class="image-header">
               <h3>英雄头像</h3>
@@ -74,19 +74,19 @@
             </div>
             
             <el-row :gutter="20" class="stats-grid">
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均KDA</div>
                   <div class="stat-value">{{ hero.avg_kda }}</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均击杀</div>
                   <div class="stat-value">{{ hero.avg_kills }}</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均死亡</div>
                   <div class="stat-value">{{ hero.avg_deaths }}</div>
@@ -95,19 +95,19 @@
             </el-row>
             
             <el-row :gutter="20" class="stats-grid">
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均助攻</div>
                   <div class="stat-value">{{ hero.avg_assists }}</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均参团率</div>
                   <div class="stat-value">{{ hero.avg_participation }}%</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均经济</div>
                   <div class="stat-value">{{ hero.avg_gold }}</div>
@@ -116,19 +116,19 @@
             </el-row>
             
             <el-row :gutter="20" class="stats-grid">
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均伤害</div>
                   <div class="stat-value">{{ hero.avg_damage }}</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均承受伤害</div>
                   <div class="stat-value">{{ hero.avg_damage_taken }}</div>
                 </div>
               </el-col>
-              <el-col :span="24" :sm="12" :md="8">
+              <el-col :span="8">
                 <div class="stat-item">
                   <div class="stat-label">平均补刀</div>
                   <div class="stat-value">{{ hero.avg_cs }}</div>
@@ -327,7 +327,6 @@ export default {
   background: #f8f9fa;
   border-radius: 8px;
   transition: all 0.3s;
-  margin-bottom: 10px;
 }
 
 .stat-item:hover {
@@ -346,89 +345,5 @@ export default {
   font-size: 20px;
   font-weight: bold;
   color: #7b1fa2;
-}
-
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .hero-detail-container {
-    padding: 10px;
-  }
-  
-  .hero-header {
-    padding: 15px;
-    margin-bottom: 20px;
-  }
-  
-  .hero-title {
-    font-size: 24px;
-  }
-  
-  .hero-basic-info {
-    padding: 15px;
-  }
-  
-  .hero-basic-info p {
-    font-size: 14px;
-  }
-  
-  .hero-img {
-    width: 150px;
-    height: 150px;
-  }
-  
-  .image-slot {
-    width: 150px;
-    height: 150px;
-    font-size: 36px;
-  }
-  
-  .stat-item {
-    padding: 10px;
-  }
-  
-  .stat-label {
-    font-size: 12px;
-  }
-  
-  .stat-value {
-    font-size: 18px;
-  }
-}
-
-@media (max-width: 480px) {
-  .hero-title {
-    font-size: 20px;
-  }
-  
-  .hero-basic-info {
-    padding: 10px;
-  }
-  
-  .hero-basic-info p {
-    font-size: 13px;
-  }
-  
-  .hero-img {
-    width: 120px;
-    height: 120px;
-  }
-  
-  .image-slot {
-    width: 120px;
-    height: 120px;
-    font-size: 28px;
-  }
-  
-  .stat-item {
-    padding: 8px;
-  }
-  
-  .stat-label {
-    font-size: 11px;
-  }
-  
-  .stat-value {
-    font-size: 16px;
-  }
 }
 </style>
