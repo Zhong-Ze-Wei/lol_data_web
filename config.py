@@ -7,6 +7,7 @@ load_dotenv()
 LOG_DIR = 'logs/'
 PROXY = None
 SPIDER_DEBUG = True
+LAST_MATCH_ID = 61779  # 上次爬取到的最后一个比赛ID
 
 class Config:
     SQLALCHEMY_DATABASE_URI = (
