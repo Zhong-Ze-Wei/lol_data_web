@@ -16,28 +16,30 @@ def get_players():
     position = request.args.get('position')    # 筛选条件：分路
     page = request.args.get('page', 1, type=int)  # 分页，默认为第1页
 
-    # 子查询：每个选手的最近比赛时间
-    latest_game_subquery = (
+    # 子查询：计算每个选手的出场次数和最近比赛时间
+    player_stats_subquery = (
         db.session.query(
             Player.name.label("name"),
+            func.count(Player.name).label("appearance_count"),
             func.max(Player.date).label("latest_date")
         )
         .group_by(Player.name)
         .subquery()
     )
 
-    # 主查询：获取选手名、头像、最近战队和分路
+    # 主查询：获取选手名、头像、最近战队和分路，以及出场次数
     PlayerAlias = aliased(Player)
     query = db.session.query(
         PlayerAlias.name,
         PlayerAlias.pic,
         PlayerAlias.team_name,
         PlayerAlias.position,
-        latest_game_subquery.c.latest_date  # 添加最新比赛时间
+        player_stats_subquery.c.latest_date,  # 添加最新比赛时间
+        player_stats_subquery.c.appearance_count  # 添加出场次数
     ).join(
-        latest_game_subquery,
-        (PlayerAlias.name == latest_game_subquery.c.name) &
-        (PlayerAlias.date == latest_game_subquery.c.latest_date)
+        player_stats_subquery,
+        (PlayerAlias.name == player_stats_subquery.c.name) &
+        (PlayerAlias.date == player_stats_subquery.c.latest_date)
     )
 
     # 根据战队名进行筛选
@@ -51,8 +53,8 @@ def get_players():
     # 去重，避免重复的选手
     query = query.distinct()
 
-    # 按照最近比赛时间降序排列，优先展示最近打过游戏的人
-    query = query.order_by(latest_game_subquery.c.latest_date.desc())
+    # 按照出场次数降序排列，优先展示出场次数多的选手
+    query = query.order_by(player_stats_subquery.c.appearance_count.desc())
 
     # 分页
     players = query.paginate(page=page, per_page=24, error_out=False)
@@ -65,6 +67,7 @@ def get_players():
             'pic': player.pic,
             'team_name': player.team_name,
             'position': player.position,
+            'appearance_count': player.appearance_count,
             'latest_date': player.latest_date.strftime('%Y-%m-%d') if player.latest_date else None
         })
 

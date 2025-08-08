@@ -16,16 +16,26 @@ def distinct_teams():
         page = request.args.get('page', 1, type=int)
         team_name = request.args.get('team_name', '', type=str).strip()
 
-        # 查询不重复的战队名
-        query = db.session.query(Team.team_name).filter(Team.team_name.isnot(None))
+        # 计算每个战队的比赛场数
+        team_match_counts = db.session.query(
+            Team.team_name,
+            func.count(Team.team_name).label('match_count')
+        ).filter(Team.team_name.isnot(None))
+        
         if team_name:
-            query = query.filter(Team.team_name.ilike(f'%{team_name}%'))
-
-        distinct_query = query.distinct()
-
+            team_match_counts = team_match_counts.filter(Team.team_name.ilike(f'%{team_name}%'))
+        
+        team_match_counts = team_match_counts.group_by(Team.team_name).subquery()
+        
+        # 查询不重复的战队名，并按比赛场数排序
+        query = db.session.query(
+            team_match_counts.c.team_name,
+            team_match_counts.c.match_count
+        ).order_by(team_match_counts.c.match_count.desc())
+        
         # 分页
-        pagination = distinct_query.paginate(page=page, per_page=20, error_out=False)
-
+        pagination = query.paginate(page=page, per_page=20, error_out=False)
+        
         # 获取所有队伍名称
         team_names = [team.team_name for team in pagination.items]
         
@@ -43,11 +53,15 @@ def distinct_teams():
         # 创建映射字典
         team_dict = {team.team_name: team.id for team in team_objects}
 
+        # 创建team_name到match_count的映射
+        match_count_dict = {item.team_name: item.match_count for item in pagination.items}
+        
         teams_data = []
         for team_name in team_names:
             teams_data.append({
                 'id': team_dict.get(team_name),
-                'team_name': team_name
+                'team_name': team_name,
+                'match_count': match_count_dict.get(team_name, 0)
             })
 
         return jsonify({
