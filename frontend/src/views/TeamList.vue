@@ -43,6 +43,7 @@
         <div class="team-card-content">
           <div class="team-info">
             <h3>{{ team.team_name }}</h3>
+            <p>比赛场数: {{ team.match_count || 0 }}</p>
           </div>
         </div>
       </el-card>
@@ -112,6 +113,12 @@ export default {
     handlePageChange(page) {
       this.pagination.page = page;
       this.fetchTeams();
+      
+      // 滚动到列表顶部而不是页面顶部
+      const listContainer = document.querySelector('.team-grid');
+      if (listContainer) {
+        listContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     },
     goToTeamDetail(teamName) {
       this.$router.push(`/team/${encodeURIComponent(teamName)}`);
@@ -178,26 +185,33 @@ export default {
 
 .team-card {
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
   border-radius: 12px;
   overflow: hidden;
 }
 
 .team-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  transform: translateY(-8px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
 .team-card-content {
   text-align: center;
-  padding: 40px 20px;
+  padding: 20px;
   background: linear-gradient(120deg, #ffffff, #f8f9ff);
 }
 
 .team-info h3 {
+  margin: 15px 0 10px;
   font-size: 20px;
   font-weight: 600;
   color: #333;
+}
+
+.team-info p {
+  margin: 8px 0;
+  color: #666;
+  font-size: 14px;
 }
 
 .pagination-container {
@@ -246,7 +260,15 @@ export default {
   }
 
   .team-info h3 {
-    font-size: 16px;
+    font-size: 18px;
+  }
+  
+  .team-info p {
+    font-size: 14px;
+  }
+  
+  .team-info p {
+    font-size: 13px;
   }
 }
 

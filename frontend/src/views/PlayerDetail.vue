@@ -52,7 +52,7 @@
       </div>
       
       <!-- 在桌面端使用表格形式展示 -->
-      <el-table :data="players" style="width: 100%" stripe v-else>
+      <el-table :data="players" style="width: 100%" stripe v-else class="player-match-table">
         <el-table-column prop="date" label="比赛日期" width="120"></el-table-column>
         <el-table-column prop="hero" label="英雄"></el-table-column>
         <el-table-column prop="kda" label="KDA"></el-table-column>
@@ -132,83 +132,146 @@ export default {
 }
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
+@import '@/assets/styles/_variables.scss';
+@import '@/assets/styles/mixins';
+
+.player-match-table {
+  background-color: rgba($lol-card-bg, 0.7);
+  border: 1px solid rgba($lol-secondary, 0.2);
+  border-radius: $border-radius;
+  margin-top: $spacing-medium;
+  
+  /deep/ th {
+    background-color: rgba($lol-primary, 0.2) !important;
+    color: $lol-secondary;
+    font-weight: bold;
+    border-bottom: 1px solid rgba($lol-secondary, 0.2);
+  }
+  
+  /deep/ tr {
+    background-color: rgba($lol-card-bg, 0.5);
+    color: $lol-text;
+    
+    &:hover {
+      background-color: rgba($lol-primary, 0.1) !important;
+    }
+  }
+  
+  /deep/ .el-table__row--striped {
+    background-color: rgba($lol-card-bg, 0.3) !important;
+  }
+  
+  /deep/ .el-tag {
+    border: none;
+    font-weight: bold;
+    
+    &.el-tag--success {
+      background-color: rgba($lol-success, 0.2);
+      color: $lol-success;
+    }
+    
+    &.el-tag--danger {
+      background-color: rgba($lol-danger, 0.2);
+      color: $lol-danger;
+    }
+  }
+  
+  /deep/ .el-button {
+    background-color: rgba($lol-secondary, 0.1);
+    border-color: rgba($lol-secondary, 0.3);
+    color: $lol-secondary;
+    
+    &:hover {
+      background-color: rgba($lol-secondary, 0.2);
+    }
+  }
+}
+
 .player-detail-container {
-  padding: 20px;
+  padding: $spacing-medium;
   max-width: 1200px;
   margin: 0 auto;
 }
 
 .welcome-card {
-  margin-bottom: 20px;
-  border-radius: 15px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  @include lol-card;
+  margin-bottom: $spacing-medium;
+  background: linear-gradient(120deg, rgba($lol-card-bg, 0.9), rgba($lol-card-bg, 0.7));
+  border: 1px solid rgba($lol-secondary, 0.2);
 }
 
 .welcome-header {
-  background: linear-gradient(90deg, #4361ee, #3a0ca3);
-  color: white;
+  background: linear-gradient(90deg, $lol-primary, darken($lol-primary, 10%));
+  color: $lol-secondary;
   border-radius: 8px 8px 0 0;
-  padding: 15px 20px;
+  padding: $spacing-small $spacing-medium;
 }
 
 .welcome-header h2 {
   margin: 0;
   font-weight: 600;
+  font-family: 'BeaufortforLOL', sans-serif;
 }
 
 .welcome-text {
   font-size: 16px;
-  color: #555;
+  color: $lol-text;
   line-height: 1.6;
-  margin: 20px 0;
-  padding: 0 15px;
+  margin: $spacing-medium 0;
+  padding: 0 $spacing-small;
 }
 
 .el-page-header {
-  margin-bottom: 20px;
+  margin-bottom: $spacing-medium;
 }
 
 /* 移动端样式 */
 .mobile-view {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: $spacing-small;
 }
 
 .match-card {
+  @include lol-card;
   cursor: pointer;
-  transition: all 0.3s;
-}
-
-.match-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background-color: rgba($lol-card-bg, 0.8);
+  border: 1px solid rgba($lol-secondary, 0.2);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba($lol-primary, 0.15);
+  }
+  
+  /deep/ .el-card__body {
+    padding: $spacing-small;
+  }
 }
 
 .match-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: $spacing-small;
   padding-bottom: 8px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid rgba($lol-secondary, 0.2);
 }
 
 .match-date {
   font-weight: bold;
-  color: #333;
+  color: $lol-secondary;
 }
 
 .match-content {
-  margin-bottom: 15px;
+  margin-bottom: $spacing-small;
 }
 
 .hero-info, .kda-info {
   margin-bottom: 5px;
   font-size: 14px;
+  color: $lol-text;
 }
 
 .detail-button {
@@ -216,28 +279,27 @@ export default {
 }
 
 /* 移动端适配 */
-@media (max-width: 768px) {
+@include mobile {
   .player-detail-container {
-    padding: 10px;
+    padding: $spacing-small;
   }
   
   .welcome-card {
-    margin-bottom: 15px;
-    border-radius: 10px;
+    margin-bottom: $spacing-small;
   }
   
   .welcome-header {
-    padding: 12px 15px;
-  }
-  
-  .welcome-header h2 {
-    font-size: 20px;
+    padding: 10px $spacing-small;
+    
+    h2 {
+      font-size: 20px;
+    }
   }
   
   .welcome-text {
     font-size: 14px;
-    margin: 15px 0;
-    padding: 0 10px;
+    margin: $spacing-small 0;
+    padding: 0 8px;
   }
   
   .match-header {
@@ -265,7 +327,7 @@ export default {
   }
   
   .match-card {
-    padding: 10px;
+    padding: $spacing-small;
   }
   
   .hero-info, .kda-info {

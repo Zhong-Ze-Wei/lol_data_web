@@ -41,8 +41,15 @@
       </el-form>
     </div>
 
+    <!-- 加载状态指示器 -->
+    <div v-if="loading" class="loading-container">
+      <el-skeleton :rows="5" animated />
+      <el-skeleton :rows="5" animated />
+      <el-skeleton :rows="5" animated />
+    </div>
+
     <!-- 选手列表展示 -->
-    <div class="player-grid">
+    <div v-else class="player-grid">
       <el-card
         v-for="player in players"
         :key="player.name"
@@ -69,6 +76,7 @@
             <h3>{{ player.name }}</h3>
             <p>战队：{{ player.team_name }}</p>
             <p>分路：{{ positionMapping[player.position] }}</p>
+            <p>出场次数：{{ player.appearance_count || 0 }}</p>
             <p>最近比赛：{{ player.latest_date }}</p>
           </div>
         </div>
@@ -93,6 +101,7 @@ export default {
   name: 'PlayerList',
   data() {
     return {
+      loading: false,
       filterForm: {
         team_name: '',
         position: ''
@@ -141,6 +150,12 @@ export default {
     handlePageChange(page) {
       this.pagination.page = page;
       this.fetchPlayers();
+      
+      // 滚动到列表顶部而不是页面顶部
+      const listContainer = document.querySelector('.player-grid');
+      if (listContainer) {
+        listContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     },
     goToPlayerDetail(name) {
       this.$router.push(`/player/${encodeURIComponent(name)}`);
@@ -207,16 +222,20 @@ export default {
 
 .player-card {
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .player-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  transform: translateY(-8px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
 .player-card-content {
   text-align: center;
+  padding: 20px;
+  background: linear-gradient(120deg, #ffffff, #f8f9ff);
 }
 
 .player-img {
@@ -227,11 +246,13 @@ export default {
 
 .player-info h3 {
   margin: 15px 0 10px;
-  font-size: 18px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
 }
 
 .player-info p {
-  margin: 5px 0;
+  margin: 8px 0;
   color: #666;
   font-size: 14px;
 }

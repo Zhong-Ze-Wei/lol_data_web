@@ -159,6 +159,12 @@ export default {
     handlePageChange(page) {
       this.pagination.page = page;
       this.fetchMatches();
+      
+      // 滚动到列表顶部而不是页面顶部
+      const listContainer = document.querySelector('.match-list');
+      if (listContainer) {
+        listContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     },
     goToMatchDetail(matchId) {
       this.$router.push(`/match/${matchId}`);
