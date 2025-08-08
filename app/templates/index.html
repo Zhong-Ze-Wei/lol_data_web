@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>首页</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+</head>
+<body>
+    <h1>欢迎来到比赛数据平台</h1>
+
+    <div class="carousel-container">
+      <div class="carousel" id="carousel">
+        <div class="carousel-item">
+          <img src="{{ url_for('static', filename='img/match1.jpg') }}" alt="比赛1">
+          <div class="caption">2023年夏季总决赛：EDG vs RNG</div>
+        </div>
+        <div class="carousel-item">
+          <img src="{{ url_for('static', filename='img/match2.jpg') }}" alt="比赛2">
+          <div class="caption">2022年春季巅峰对决：JDG vs TES</div>
+        </div>
+        <div class="carousel-item">
+          <img src="{{ url_for('static', filename='img/match3.jpg') }}" alt="比赛3">
+          <div class="caption">全球总决赛：T1 vs DRX</div>
+        </div>
+      </div>
+    </div>
+
+    <section class="intro">
+        <p>本平台致力于为用户提供全面、直观的英雄联盟比赛数据分析与展示，包括比赛结果、选手表现和英雄使用情况等。</p>
+    </section>
+
+    <div class="nav-buttons">
+        <a href="{{ url_for('match.show_matches') }}">比赛信息</a>
+        <a href="{{ url_for('player.show_players') }}">选手信息</a>
+        <a href="{{ url_for('hero.hero_list') }}">英雄信息</a>
+    </div>
+
+    <section class="about">
+        <img src="{{ url_for('static', filename='img/my_photo.jpg') }}" alt="个人头像">
+        <div class="about-text">
+            <h2>开发者简介</h2>
+            <p>你好，我是zz，一个普通的游戏爱好者，让我们用数据洞察万物</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2025 比赛数据平台 | 联系方式：1017433636@qq.com</p>
+    </footer>
+</body>
+</html>

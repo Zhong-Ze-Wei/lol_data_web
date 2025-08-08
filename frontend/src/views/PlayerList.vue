@@ -1,39 +1,27 @@
 <template>
   <div class="player-list-container">
-    <!-- 标题和欢迎信息 -->
-    <el-row :gutter="20">
-      <el-col :span="24">
-        <el-card class="welcome-card" shadow="hover">
-          <div slot="header" class="welcome-header">
-            <h2>🏆 选手展示</h2>
-          </div>
-          <p class="welcome-text">在这里您可以查看所有职业选手的信息，通过筛选条件查找您感兴趣的选手。</p>
-        </el-card>
-      </el-col>
-    </el-row>
+    <h1>选手展示</h1>
 
     <!-- 筛选表单 -->
     <div class="filter-form">
       <el-form :inline="true" :model="filterForm" class="filter-form-inline">
-        <div class="form-row">
-          <el-form-item label="战队名称">
-            <el-input
-              v-model="filterForm.team_name"
-              placeholder="请输入战队名称"
-              clearable
-            />
-          </el-form-item>
+        <el-form-item label="战队名称">
+          <el-input
+            v-model="filterForm.team_name"
+            placeholder="请输入战队名称"
+            clearable
+          />
+        </el-form-item>
 
-          <el-form-item label="分路">
-            <el-select v-model="filterForm.position" placeholder="选择分路" clearable>
-              <el-option label="上单" value="a"></el-option>
-              <el-option label="打野" value="b"></el-option>
-              <el-option label="中单" value="c"></el-option>
-              <el-option label="ADC" value="d"></el-option>
-              <el-option label="辅助" value="e"></el-option>
-            </el-select>
-          </el-form-item>
-        </div>
+        <el-form-item label="分路">
+          <el-select v-model="filterForm.position" placeholder="选择分路" clearable>
+            <el-option label="上单" value="a"></el-option>
+            <el-option label="打野" value="b"></el-option>
+            <el-option label="中单" value="c"></el-option>
+            <el-option label="ADC" value="d"></el-option>
+            <el-option label="辅助" value="e"></el-option>
+          </el-select>
+        </el-form-item>
 
         <el-form-item>
           <el-button type="primary" @click="fetchPlayers">筛选</el-button>
@@ -62,11 +50,7 @@
             class="player-img"
             fit="cover"
             :alt="player.name + '头像'"
-            lazy
           >
-            <div slot="placeholder" class="image-slot">
-              <i class="el-icon-loading"></i>
-            </div>
             <div slot="error" class="image-slot">
               <i class="el-icon-user-solid"></i>
             </div>
@@ -171,46 +155,11 @@ export default {
   margin: 0 auto;
 }
 
-.welcome-card {
-  margin-bottom: 20px;
-  border-radius: 15px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
-}
-
-.welcome-header {
-  background: linear-gradient(90deg, #4361ee, #3a0ca3);
-  color: white;
-  border-radius: 8px 8px 0 0;
-  padding: 15px 20px;
-}
-
-.welcome-header h2 {
-  margin: 0;
-  font-weight: 600;
-}
-
-.welcome-text {
-  font-size: 16px;
-  color: #555;
-  line-height: 1.6;
-  margin: 20px 0;
-  padding: 0 15px;
-}
-
 .filter-form {
   background: #f5f7fa;
   padding: 20px;
   border-radius: 8px;
   margin-bottom: 30px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
-.form-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
 }
 
 .player-grid {
@@ -272,80 +221,5 @@ export default {
   background: #f5f7fa;
   color: #909399;
   font-size: 30px;
-}
-
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .player-list-container {
-    padding: 10px;
-  }
-  
-  .welcome-card {
-    margin-bottom: 15px;
-    border-radius: 10px;
-  }
-  
-  .welcome-header {
-    padding: 12px 15px;
-  }
-  
-  .welcome-header h2 {
-    font-size: 20px;
-  }
-  
-  .welcome-text {
-    font-size: 14px;
-    margin: 15px 0;
-    padding: 0 10px;
-  }
-  
-  .filter-form {
-    padding: 15px;
-    margin-bottom: 20px;
-  }
-  
-  .form-row {
-    flex-direction: column;
-    gap: 10px;
-  }
-  
-  .player-grid {
-    grid-template-columns: repeat(auto-fill, minmax(100%, 1fr));
-    gap: 15px;
-  }
-  
-  .player-info h3 {
-    font-size: 16px;
-  }
-  
-  .player-info p {
-    font-size: 13px;
-  }
-}
-
-@media (max-width: 480px) {
-  .welcome-header h2 {
-    font-size: 18px;
-  }
-  
-  .welcome-text {
-    font-size: 13px;
-  }
-  
-  .filter-form {
-    padding: 10px;
-  }
-  
-  .player-grid {
-    gap: 10px;
-  }
-  
-  .player-info h3 {
-    font-size: 14px;
-  }
-  
-  .player-info p {
-    font-size: 12px;
-  }
 }
 </style>
