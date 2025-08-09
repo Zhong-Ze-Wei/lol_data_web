@@ -83,81 +83,125 @@ def get_players():
         }
     })
 
-
 @player_bp.route('/api/<string:name>', methods=['GET'])
 def get_player_matches(name):
-    """获取特定选手比赛记录API"""
-    # 对URL编码的名称进行解码
     from urllib.parse import unquote
     name = unquote(name)
 
-    # 查找该玩家的所有参赛记录
+    # 查询该选手所有比赛记录
     players = Player.query.filter_by(name=name).all()
     if not players:
         return jsonify({'error': '该玩家未收录'}), 404
 
-    # 提取所有参与过的 match_id
-    match_ids = list(set(player.match_id for player in players))
+    # 提取所有比赛ID
+    match_ids = list(set(p.match_id for p in players))
 
-    # 获取所有相关比赛数据
-    matches = Match.query.filter(Match.id.in_(match_ids)).order_by(Match.date.desc()).all()
-
-    # 获取所有相关战队数据
+    # 查询所有比赛和战队数据
+    matches = Match.query.filter(Match.match_id.in_(match_ids)).order_by(Match.date.desc()).all()
     teams = Team.query.filter(Team.match_id.in_(match_ids)).all()
-    
-    # 构造返回数据
-    players_data = []
-    for player in players:
-        players_data.append({
-            'date': player.date.strftime('%Y-%m-%d') if player.date else None,
-            'hero': player.hero,
-            'hero_lv': player.hero_lv,
-            'kda': player.kda,
-            'kills': player.kills,
-            'deaths': player.deaths,
-            'assists': player.assists,
-            'part': player.part,
-            'atk': player.atk,
-            'atk_p': player.atk_p,
-            'atk_m': player.atk_m,
-            'def_': player.def_,
-            'def_p': player.def_p,
-            'def_m': player.def_m,
-            'hits': player.hits,
-            'money': player.money,
-            'result': player.result,
-            'match_id': player.match_id
-        })
-    
-    matches_data = []
-    for match in matches:
-        matches_data.append({
-            'match_id': match.match_id,
-            'date': match.date.strftime('%Y-%m-%d') if match.date else None,
-            'game_time': match.game_time,
-            'red_team_name': match.red_team_name,
-            'blue_team_name': match.blue_team_name,
-            'win_team_name': match.win_team_name,
-            'mvp': match.mvp
-        })
-    
-    teams_data = []
-    for team in teams:
-        teams_data.append({
-            'match_id': team.match_id,
-            'team_name': team.team_name,
-            'team_flag': team.team_flag,
-            'result': team.result,
-            'kill': team.kill,
-            'death': team.death,
-            'assist': team.assist,
-            'money': team.money,
-            'tower': team.tower
-        })
+
+    # 构造比赛列表
+    matches_data = [{
+        'match_id': m.match_id,
+        'date': m.date.strftime('%Y-%m-%d') if m.date else None,
+        'game_time': m.game_time,
+        'red_team_name': m.red_team_name,
+        'blue_team_name': m.blue_team_name,
+        'win_team_name': m.win_team_name,
+        'mvp': m.mvp
+    } for m in matches]
+
+    # 构造战队列表
+    teams_data = [{
+        'match_id': t.match_id,
+        'team_name': t.team_name,
+        'team_flag': t.team_flag,
+        'result': t.result,
+        'kill': t.kill,
+        'death': t.death,
+        'assist': t.assist,
+        'money': t.money,
+        'tower': t.tower
+    } for t in teams]
+
+    # 构造选手比赛数据列表
+    players_data = [{
+        'date': p.date.strftime('%Y-%m-%d') if p.date else None,
+        'hero': p.hero,
+        'hero_lv': p.hero_lv,
+        'kda': p.kda,
+        'kills': p.kills,
+        'deaths': p.deaths,
+        'assists': p.assists,
+        'part': p.part,
+        'atk': p.atk,
+        'atk_p': p.atk_p,
+        'atk_m': p.atk_m,
+        'def_': p.def_,
+        'def_p': p.def_p,
+        'def_m': p.def_m,
+        'hits': p.hits,
+        'money': p.money,
+        'result': p.result,
+        'position': p.position,
+        'pic': p.pic,
+        'match_id': p.match_id
+    } for p in players]
+
+    total_matches = len(players_data)
+    if total_matches == 0:
+        return jsonify({'error': '该玩家暂无比赛数据'}), 404
+
+    # 计算胜率（result字段为 '1' 表示胜利）
+    win_count = sum(1 for p in players_data if p['result'] == '1')
+    win_rate = round(win_count / total_matches * 100, 1)
+
+    # 计算KDA均值，防止除零
+    avg_kills = round(sum(p['kills'] for p in players_data) / total_matches, 1)
+    avg_deaths = round(sum(p['deaths'] for p in players_data) / total_matches, 1)
+    avg_assists = round(sum(p['assists'] for p in players_data) / total_matches, 1)
+
+    # 计算经济均值和攻击防御相关均值
+    avg_money = round(sum(p['money'] for p in players_data if p['money']) / total_matches, 1)
+    avg_atk_m = round(sum(p['atk_m'] for p in players_data if p['atk_m']) / total_matches, 1)
+    avg_def_m = round(sum(p['def_m'] for p in players_data if p['def_m']) / total_matches, 1)
+
+    # 统计不同英雄数量（去重）
+    hero_pool = len(set(p['hero'] for p in players_data if p['hero']))
+
+    # 选手位置取最常见位置
+    from collections import Counter
+    positions = [p['position'] for p in players_data if p['position']]
+    position_counter = Counter(positions)
+    main_position = position_counter.most_common(1)[0][0] if positions else '未知'
+
+    # 选手头像，取最近比赛的
+    pic = next((p['pic'] for p in sorted(players_data, key=lambda x: x['date'], reverse=True) if p['pic']), '')
+
+    # 生成选手简介
+    bio = (
+        f"{name}是一位职业{main_position}选手，职业生涯共参加{total_matches}场比赛，"
+        f"胜率{win_rate}%。场均KDA为{avg_kills}/{avg_deaths}/{avg_assists}，"
+        f"场均经济{avg_money}，场均输出{avg_atk_m}，场均承伤{avg_def_m}。"
+        f"共使用过{hero_pool}个不同英雄。"
+    )
 
     return jsonify({
         'name': name,
+        'pic': pic,
+        'main_position': main_position,
         'players': players_data,
         'matches': matches_data,
-        'teams': teams_data
+        'teams': teams_data,
+        'stats': {
+            'totalMatches': total_matches,
+            'winRate': win_rate,
+            'avgKDA': f"{avg_kills}/{avg_deaths}/{avg_assists}",
+            'avgMoney': avg_money,
+            'avgAtkM': avg_atk_m,
+            'avgDefM': avg_def_m,
+            'heroPool': hero_pool,
+            'positions': list(position_counter.keys())
+        },
+        'bio': bio
     })
