@@ -116,8 +116,7 @@ python scripts/import_data.py
 python run.py
 
 cd frontend
-npm run serve（这个是跑项目）
-npm run build（运行打包后的项目）
+npm run serve
 ```
 默认访问地址为：
 ```
