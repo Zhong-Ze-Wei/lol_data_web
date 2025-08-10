@@ -21,50 +21,46 @@
     <div class="filter-form">
       <el-form :inline="true" :model="filterForm" class="filter-form-inline">
         <div class="form-row">
-          <div class="form-group">
-            <el-form-item label="战队1名称">
-              <el-input
-                v-model="filterForm.team_name1"
-                placeholder="请输入战队1名称"
-                clearable
-              />
-            </el-form-item>
+          <el-form-item label="战队：" >
+            <el-input
+              v-model="filterForm.team_name1"
+              placeholder="请输入战队1名称"
+              clearable
+            />
+          </el-form-item>
 
-            <el-form-item label="战队2名称">
-              <el-input
-                v-model="filterForm.team_name2"
-                placeholder="请输入战队2名称"
-                clearable
-              />
-            </el-form-item>
-          </div>
+          <el-form-item label="">
+            <el-input
+              v-model="filterForm.team_name2"
+              placeholder="请输入战队2名称"
+              clearable
+            />
+          </el-form-item>
 
-          <div class="form-group">
-            <el-form-item label="开始时间">
-              <el-date-picker
-                v-model="filterForm.start_date"
-                type="month"
-                placeholder="选择开始月份"
-                format="yyyy-MM"
-                value-format="yyyy-MM"
-              />
-            </el-form-item>
+          <el-form-item label="时间">
+            <el-date-picker
+              v-model="filterForm.start_date"
+              type="month"
+              placeholder="选择开始月份"
+              format="yyyy-MM"
+              value-format="yyyy-MM"
+            />
+          </el-form-item>
 
-            <el-form-item label="结束时间">
-              <el-date-picker
-                v-model="filterForm.end_date"
-                type="month"
-                placeholder="选择结束月份"
-                format="yyyy-MM"
-                value-format="yyyy-MM"
-              />
-            </el-form-item>
-          </div>
+          <el-form-item >
+            <el-date-picker
+              v-model="filterForm.end_date"
+              type="month"
+              placeholder="选择结束月份"
+              format="yyyy-MM"
+              value-format="yyyy-MM"
+            />
+          </el-form-item>
+
+          <el-form-item>
+            <el-button type="primary" @click="fetchMatches">筛选</el-button>
+          </el-form-item>
         </div>
-
-        <el-form-item>
-          <el-button type="primary" @click="fetchMatches">筛选</el-button>
-        </el-form-item>
       </el-form>
     </div>
 
@@ -254,13 +250,27 @@ export default {
 .form-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: 10px;
+  align-items: flex-end;
+  justify-content: flex-start;
 }
 
-.form-group {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
+/* 调整表单项的样式 */
+.filter-form-inline .el-form-item {
+  margin-right: 0;
+  margin-bottom: 5px;
+}
+
+/* 响应式布局 */
+@media (max-width: 768px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .filter-form-inline .el-form-item {
+    margin-bottom: 5px;
+  }
 }
 
 .match-list {

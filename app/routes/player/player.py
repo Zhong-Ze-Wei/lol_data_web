@@ -14,6 +14,7 @@ def get_players():
     # 获取请求参数
     team_name = request.args.get('team_name')  # 筛选条件：战队名称
     position = request.args.get('position')    # 筛选条件：分路
+    player_name = request.args.get('player_name')  # 筛选条件：选手名称
     page = request.args.get('page', 1, type=int)  # 分页，默认为第1页
 
     # 子查询：计算每个选手的出场次数和最近比赛时间
@@ -49,6 +50,10 @@ def get_players():
     # 根据分路进行筛选
     if position:
         query = query.filter(PlayerAlias.position.ilike(f'%{position}%'))
+        
+    # 根据选手名称进行筛选
+    if player_name:
+        query = query.filter(PlayerAlias.name.ilike(f'%{player_name}%'))
 
     # 去重，避免重复的选手
     query = query.distinct()

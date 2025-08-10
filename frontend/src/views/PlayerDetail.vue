@@ -7,12 +7,11 @@
       <div class="profile-header">选手信息</div>
       <div class="profile-content">
         <div class="profile-left">
-          <h1 class="player-name">{{ playerData.name }}</h1>
-          <el-tag size="small" type="info">{{ playerData.main_position }}</el-tag>
+          <h1 class="player-name">{{ playerData.name }} <el-tag size="small" type="info">{{ getPositionName(playerData.main_position) }}</el-tag></h1>
           <p class="player-bio">
-            Faker是一位职业c选手，职业生涯共参加{{ playerData.stats.totalMatches }}场比赛，胜率{{ playerData.stats.winRate }}%。<br />
-            场均KDA为{{ playerData.stats.avgKDA }}/2.1/5.4，场均经济{{ playerData.stats.avgEconomy || 'N/A' }}，场均输出{{ playerData.stats.avgDamage || 'N/A' }}，场均承伤{{ playerData.stats.avgDamageTaken || 'N/A' }}。<br />
-            共使用过{{ playerData.stats.heroCount || 0 }}个不同英雄。
+            {{ playerData.name }}是一位职业{{ getPositionName(playerData.main_position) }}选手，职业生涯共参加{{ playerData.stats.totalMatches }}场比赛，胜率{{ playerData.stats.winRate }}%。<br />
+            场均KDA为{{ playerData.stats.avgKDA }}，场均经济{{ playerData.stats.avgMoney }}，场均输出{{ playerData.stats.avgAtkM }}，场均承伤{{ playerData.stats.avgDefM }}。<br />
+            共使用过{{ playerData.stats.heroPool || 0 }}个不同英雄。
           </p>
         </div>
         <el-avatar :size="120" :src="playerData.pic" fit="cover" class="player-avatar"></el-avatar>
@@ -72,6 +71,16 @@ export default {
     this.fetchPlayerData();
   },
   methods: {
+    getPositionName(position) {
+      const positionMapping = {
+        'a': '上单',
+        'b': '打野',
+        'c': '中单',
+        'd': 'ADC',
+        'e': '辅助'
+      };
+      return positionMapping[position] || position;
+    },
     async fetchPlayerData() {
       this.loading = true;
       try {

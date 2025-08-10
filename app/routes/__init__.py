@@ -1,4 +1,3 @@
-# app/__init__.py
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
@@ -16,13 +15,15 @@ def create_app():
     from app.routes.player import player_bp
     from app.routes.match import match_bp
     from app.routes.hero import hero_bp
-    from app.routes.team import team_bp  # 新增team蓝图
+    from app.routes.team import team_bp
+    from app.routes.ai import ai_bp
 
     app.register_blueprint(main_bp, url_prefix='')  # 主页蓝图不需要前缀
     app.register_blueprint(player_bp)
     app.register_blueprint(match_bp)
     app.register_blueprint(hero_bp)
-    app.register_blueprint(team_bp)  # 注册team蓝图
+    app.register_blueprint(team_bp)
+    app.register_blueprint(ai_bp)
 
     # 添加CORS支持，方便前端开发
     from flask_cors import CORS

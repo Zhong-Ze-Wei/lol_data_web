@@ -37,6 +37,14 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="选手名称">
+          <el-input
+            v-model="filterForm.player_name"
+            placeholder="请输入选手名称"
+            clearable
+          />
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" @click="fetchPlayers">筛选</el-button>
         </el-form-item>
@@ -102,7 +110,8 @@ export default {
       loading: false,
       filterForm: {
         team_name: '',
-        position: ''
+        position: '',
+        player_name: ''
       },
       players: [],
       pagination: {
@@ -133,6 +142,9 @@ export default {
         if (this.filterForm.position) {
           params.append('position', this.filterForm.position);
         }
+        if (this.filterForm.player_name) {
+          params.append('player_name', this.filterForm.player_name);
+        }
         params.append('page', this.pagination.page);
 
         const response = await fetch(`/player/api/list?${params.toString()}`);
@@ -148,7 +160,7 @@ export default {
     handlePageChange(page) {
       this.pagination.page = page;
       this.fetchPlayers();
-      
+
       // 滚动到列表顶部而不是页面顶部
       const listContainer = document.querySelector('.player-grid');
       if (listContainer) {
