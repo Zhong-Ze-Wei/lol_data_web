@@ -15,19 +15,19 @@ class Player(db.Model):
     deaths = db.Column(db.Integer, nullable=True)  # 死亡数
     assists = db.Column(db.Integer, nullable=True)  # 助攻数
     part = db.Column(db.String(20), nullable=True)  # 参团率
-    atk = db.Column(db.Integer, nullable=True)  # 攻击次数
+    atk = db.Column(db.Integer, nullable=True)  # 总输出
     atk_p = db.Column(db.Integer, nullable=True)  # 输出占比
     atk_m = db.Column(db.Integer, nullable=True)  # 分均输出
-    def_ = db.Column(db.Integer, nullable=True)  # 防御次数
+    def_ = db.Column(db.Integer, nullable=True)  # 承伤总量
     def_p = db.Column(db.Integer, nullable=True)  # 承伤占比
     def_m = db.Column(db.Integer, nullable=True)  # 分均承伤
-    adc_m = db.Column(db.Integer, nullable=True)  # ADC伤害
+    adc_m = db.Column(db.Integer, nullable=True)  # 分均补刀
     money = db.Column(db.Integer, nullable=True)  # 总经济
     money_M = db.Column(db.Integer, nullable=True)  # 分钟经济
     wp_m = db.Column(db.Integer, nullable=True)  # 分均插眼（待确认）
     hits = db.Column(db.Integer, nullable=True)  # 补刀数
     mvp = db.Column(db.Integer, nullable=True)  # 是否MVP（1/0）
-    beiguo = db.Column(db.String(100), nullable=True)  # 是否背锅（保存为字符串）
+    beiguo = db.Column(db.String(100), nullable=True)  # 是否背锅（1/0）
     team_name = db.Column(db.String(100), nullable=True)  # 战队名称
     position = db.Column(db.String(100), nullable=True)  # 选手位置（上单/打野等）
     game_time = db.Column(db.Integer, nullable=True)  # 比赛时间（秒）

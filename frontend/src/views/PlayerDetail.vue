@@ -26,22 +26,37 @@
 
     <!-- 比赛记录表 -->
     <div class="stat-section" v-if="!loading && players.length > 0">
+      <h3 class="section-title">比赛记录（按时间顺序）</h3>
       <el-table :data="players" style="width: 100%" stripe>
-        <el-table-column prop="date" label="比赛日期" width="120"></el-table-column>
-        <el-table-column prop="hero" label="英雄"></el-table-column>
-        <el-table-column label="KDA">
+        <el-table-column prop="date" label="比赛日期" width="120" sortable></el-table-column>
+        <el-table-column prop="hero" label="英雄" width="120">
           <template slot-scope="scope">
-            <div :ref="'miniKDA' + scope.$index" style="width: 100px; height: 40px;"></div>
+            <div class="hero-cell">
+              <img :src="scope.row.pic" alt="英雄图片" class="hero-image" v-if="scope.row.pic">
+              <span>{{ scope.row.hero }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="kills" label="击杀"></el-table-column>
-        <el-table-column prop="deaths" label="死亡"></el-table-column>
-        <el-table-column prop="assists" label="助攻"></el-table-column>
+        <el-table-column prop="kda" label="KDA" width="80"></el-table-column>
+        <el-table-column prop="kills" label="击杀" width="70"></el-table-column>
+        <el-table-column prop="deaths" label="死亡" width="70"></el-table-column>
+        <el-table-column prop="assists" label="助攻" width="70"></el-table-column>
+        <el-table-column prop="money" label="经济" width="80"></el-table-column>
+        <el-table-column prop="position" label="位置" width="80">
+          <template slot-scope="scope">
+            {{ getPositionName(scope.row.position) }}
+          </template>
+        </el-table-column>
         <el-table-column label="结果" width="80">
           <template slot-scope="scope">
             <el-tag :type="scope.row.result === '1' ? 'success' : 'danger'">
               {{ scope.row.result === '1' ? '胜' : '负' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="详情" width="80" fixed="right">
+          <template slot-scope="scope">
+            <el-button size="mini" type="primary" @click="viewMatchDetail(scope.row.match_id)">查看</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -166,6 +181,9 @@ export default {
           label: { show: true, formatter: '{b}: {c} ({d}%)' }
         }]
       });
+    },
+    viewMatchDetail(matchId) {
+      this.$router.push(`/match/${matchId}`);
     },
     goBack() {
       this.$router.go(-1);

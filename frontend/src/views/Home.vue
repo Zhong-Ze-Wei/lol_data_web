@@ -62,28 +62,34 @@
             <el-input
               type="textarea"
               :rows="1"
-              placeholder="请输入您的问题..."
+              placeholder="例如：查询2023年KDA最高的前5名选手、哪个战队在最近一年中胜率最高..."
               v-model="aiQuery"
               class="ai-input"
               @keyup.enter.native="submitAIQuery"
             ></el-input>
             <div class="ai-buttons">
-              <el-button 
-                type="primary" 
-                class="ai-button"
-                @click="submitAIQuery"
-                :loading="aiLoading"
-              >
-                {{ aiLoading ? '思考中...' : '发送问题' }}
-              </el-button>
-              <el-button 
-                type="info" 
-                class="ai-clear-button"
-                @click="clearAIChat"
-                :disabled="aiLoading || (!aiResult && !aiStreaming)"
-              >
-                清空对话
-              </el-button>
+              <el-row :gutter="10">
+                <el-col :span="18">
+                  <el-button 
+                    type="primary" 
+                    class="ai-button"
+                    @click="submitAIQuery"
+                    :loading="aiLoading"
+                  >
+                    {{ aiLoading ? '思考中...' : '发送问题' }}
+                  </el-button>
+                </el-col>
+                <el-col :span="6">
+                  <el-button 
+                    type="info" 
+                    class="ai-clear-button"
+                    @click="clearAIChat"
+                    :disabled="aiLoading || (!aiResult && !aiStreaming)"
+                  >
+                    清空对话
+                  </el-button>
+                </el-col>
+              </el-row>
             </div>
             <div v-if="aiResult || aiStreaming" class="ai-result-container">
               <div class="ai-result">
@@ -244,21 +250,23 @@ export default {
     if (!this.aiResult) return '';
 
     try {
-      // 尝试解析JSON
+      // 处理API返回的数据结构
       const result = typeof this.aiResult === 'string' ? JSON.parse(this.aiResult) : this.aiResult;
-
-      // 只返回answer字段
-      if (result && result.answer) {
-        // 处理选手链接
-        let answer = result.answer;
+      
+      // 检查result对象是否存在
+      const response = result.result ? result.result : result;
+      
+      // 确保有answer字段
+      if (response && response.answer) {
+        let answer = response.answer;
 
         // 如果有data数据，为选手名添加链接
-        if (result.data && result.data.length > 0) {
-          result.data.forEach(player => {
-            if (player.id && player.name) {
-              // 将选手名替换为带链接的版本(使用选手名而非ID)
+        if (response.data && response.data.length > 0) {
+          response.data.forEach(player => {
+            if (player.name) {
               const playerLink = `<a href="/player/${encodeURIComponent(player.name)}" class="player-link">${player.name}</a>`;
-              answer = answer.replace(new RegExp(player.name, 'g'), playerLink);
+              const regex = new RegExp(`\\b${player.name}\\b`, 'g');
+              answer = answer.replace(regex, playerLink);
             }
           });
         }
@@ -266,11 +274,11 @@ export default {
         return answer;
       }
 
-      // 如果没有answer字段，返回原始结果的字符串表示
-      return typeof result === 'string' ? result : JSON.stringify(result);
+      // 如果没有answer字段，返回友好的错误信息
+      return '抱歉，无法获取有效的回答。请尝试重新提问。';
     } catch (e) {
-      // 如果解析失败，直接返回原始字符串
-      return this.aiResult;
+      console.error('解析AI结果时出错:', e);
+      return '处理请求时发生错误，请稍后重试。';
     }
   }
 },
@@ -325,36 +333,36 @@ export default {
         this.$message.warning('请输入问题内容');
         return;
       }
-      
+
       // 清除之前的结果和定时器
       this.aiLoading = true;
       this.aiResult = '';
       this.aiStreaming = true;
       clearInterval(this.streamInterval);
-      
+
       try {
         console.log('发送AI查询:', this.aiQuery);
-        
-        // 调用后端AI接口
+
+        // 调用后端AI接口，限制输入内容为前100个字符
         const response = await fetch('/api/ai/query', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ prompt: this.aiQuery })
+          body: JSON.stringify({ prompt: this.aiQuery.substring(0, 100) })
         });
-        
+
         console.log('API响应状态:', response.status);
-        
+
         if (!response.ok) {
           const errorText = await response.text();
           console.error('API错误响应:', errorText);
           throw new Error(`HTTP error! Status: ${response.status}, Details: ${errorText}`);
         }
-        
+
         const data = await response.json();
         console.log('API响应数据:', data);
-        
+
         // 检查API返回的结果
         if (data.result && data.result.error) {
           // 如果有错误，直接显示错误信息
@@ -364,36 +372,42 @@ export default {
           this.aiStreaming = false;
           return;
         }
-        
+
         // 获取API返回的结果
         const apiResult = data.result;
         console.log('处理后的API结果:', apiResult);
-        
+
         // 只保存API结果对象，不转换为字符串
         this.aiResult = apiResult;
-        
+
         // 将answer部分分成多个部分，模拟流式输出
         const answerText = apiResult && apiResult.answer ? apiResult.answer : '抱歉，无法获取有效的回答。';
         const chunks = this.chunkText(answerText);
-        
+
         let currentIndex = 0;
         let currentText = '';
-        
+
         // 延迟一段时间后开始流式输出
         setTimeout(() => {
           this.aiLoading = false;
-          
+
           // 使用setInterval模拟流式输出
           this.streamInterval = setInterval(() => {
             if (currentIndex < chunks.length) {
               currentText += chunks[currentIndex];
-              // 只更新answer部分，保留完整的apiResult对象
-              this.aiResult = {
-                ...apiResult,
-                answer: currentText
-              };
+              // 更新answer部分，同时保留完整的apiResult结构
+              if (this.aiResult && this.aiResult.result) {
+                this.aiResult.result.answer = currentText;
+              } else {
+                this.aiResult = {
+                  result: {
+                    ...apiResult,
+                    answer: currentText
+                  }
+                };
+              }
               currentIndex++;
-              
+
               // 自动滚动到AI回答区域
               this.$nextTick(() => {
                 const resultContainer = document.querySelector('.ai-result-container');
