@@ -239,6 +239,31 @@
         </el-card>
       </el-col>
     </el-row>
+    
+    <!-- 微信社群 -->
+    <el-row :gutter="20" class="wechat-section">
+      <el-col :span="24">
+        <el-card class="wechat-card" shadow="hover">
+          <div class="wechat-content">
+            <div class="wechat-text">
+              <h3>🎮 加入社群讨论</h3>
+              <p>扫描二维码，与其他玩家一起讨论游戏策略、赛事分析和数据解读</p>
+              <div class="wechat-tips">
+                <el-tag type="success">每日赛事解读</el-tag>
+                <el-tag type="warning">选手数据分析</el-tag>
+                <el-tag type="info">游戏策略交流</el-tag>
+              </div>
+            </div>
+            <el-image
+              :src="require('@/assets/微信.jpg')"
+              class="wechat-qrcode"
+              fit="contain"
+              lazy
+            ></el-image>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
@@ -247,39 +272,10 @@ export default {
   name: 'Home',
   computed: {
   formattedAIResult() {
-    if (!this.aiResult) return '';
-
-    try {
-      // 处理API返回的数据结构
-      const result = typeof this.aiResult === 'string' ? JSON.parse(this.aiResult) : this.aiResult;
-      
-      // 检查result对象是否存在
-      const response = result.result ? result.result : result;
-      
-      // 确保有answer字段
-      if (response && response.answer) {
-        let answer = response.answer;
-
-        // 如果有data数据，为选手名添加链接
-        if (response.data && response.data.length > 0) {
-          response.data.forEach(player => {
-            if (player.name) {
-              const playerLink = `<a href="/player/${encodeURIComponent(player.name)}" class="player-link">${player.name}</a>`;
-              const regex = new RegExp(`\\b${player.name}\\b`, 'g');
-              answer = answer.replace(regex, playerLink);
-            }
-          });
-        }
-
-        return answer;
+      if (this.aiResult && this.aiResult.answer) {
+        return this.aiResult.answer;
       }
-
-      // 如果没有answer字段，返回友好的错误信息
-      return '抱歉，无法获取有效的回答。请尝试重新提问。';
-    } catch (e) {
-      console.error('解析AI结果时出错:', e);
-      return '处理请求时发生错误，请稍后重试。';
-    }
+      return '';
   }
 },
   data() {
@@ -334,81 +330,60 @@ export default {
         return;
       }
 
-      // 清除之前的结果和定时器
       this.aiLoading = true;
-      this.aiResult = '';
+      // 初始化为一个干净、扁平的结构
+      this.aiResult = { answer: '', data: [] };
       this.aiStreaming = true;
       clearInterval(this.streamInterval);
 
       try {
-        console.log('发送AI查询:', this.aiQuery);
-
-        // 调用后端AI接口，限制输入内容为前100个字符
         const response = await fetch('/api/ai/query', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: this.aiQuery.substring(0, 100) })
         });
 
-        console.log('API响应状态:', response.status);
-
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('API错误响应:', errorText);
-          throw new Error(`HTTP error! Status: ${response.status}, Details: ${errorText}`);
+          throw new Error(`HTTP 错误! 状态: ${response.status}, 详情: ${errorText}`);
         }
 
-        const data = await response.json();
-        console.log('API响应数据:', data);
+        const data = await response.json(); // 原始数据: { result: { answer: ..., data: ... } }
 
-        // 检查API返回的结果
-        if (data.result && data.result.error) {
-          // 如果有错误，直接显示错误信息
-          console.error('API返回错误:', data.result.error);
-          this.aiResult = `抱歉，处理您的问题时出现了错误：\n${data.result.error}\n\n请尝试重新提问或使用不同的问题表述。`;
+        // --- 核心修正逻辑 ---
+        // 1. 立即从原始数据中解构出我们需要的 result 对象
+        const apiResult = data.result;
+
+        // 2. 检查解构后的对象是否存在或包含API层面的错误
+        if (!apiResult || apiResult.error) {
+          const errorMessage = apiResult ? apiResult.error : 'API未返回有效结果。';
+          console.error('API返回错误:', errorMessage);
+          this.aiResult = { answer: `抱歉，处理您的问题时出现了错误：\n${errorMessage}`, data: [] };
           this.aiLoading = false;
           this.aiStreaming = false;
           return;
         }
 
-        // 获取API返回的结果
-        const apiResult = data.result;
-        console.log('处理后的API结果:', apiResult);
-
-        // 只保存API结果对象，不转换为字符串
-        this.aiResult = apiResult;
-
-        // 将answer部分分成多个部分，模拟流式输出
-        const answerText = apiResult && apiResult.answer ? apiResult.answer : '抱歉，无法获取有效的回答。';
+        // apiResult 现在是扁平的 { answer: ..., data: ... } 结构
+        const answerText = apiResult.answer || '抱歉，无法获取有效的回答。';
         const chunks = this.chunkText(answerText);
-
         let currentIndex = 0;
         let currentText = '';
 
-        // 延迟一段时间后开始流式输出
         setTimeout(() => {
           this.aiLoading = false;
-
-          // 使用setInterval模拟流式输出
           this.streamInterval = setInterval(() => {
             if (currentIndex < chunks.length) {
               currentText += chunks[currentIndex];
-              // 更新answer部分，同时保留完整的apiResult结构
-              if (this.aiResult && this.aiResult.result) {
-                this.aiResult.result.answer = currentText;
-              } else {
-                this.aiResult = {
-                  result: {
-                    ...apiResult,
-                    answer: currentText
-                  }
-                };
-              }
+
+              // 3. 始终基于扁平的 apiResult 对象来更新 this.aiResult
+              this.aiResult = {
+                ...apiResult,       // 继承 'data' 数组等所有其他字段
+                answer: currentText // 仅用流式文本覆盖 'answer' 字段
+              };
+
               currentIndex++;
 
-              // 自动滚动到AI回答区域
               this.$nextTick(() => {
                 const resultContainer = document.querySelector('.ai-result-container');
                 if (resultContainer) {
@@ -416,14 +391,15 @@ export default {
                 }
               });
             } else {
-              // 输出完成后清除定时器
               clearInterval(this.streamInterval);
               this.aiStreaming = false;
             }
-          }, 100); // 每100毫秒添加一段文本，使输出更流畅
+          }, 100);
         }, 500);
+
       } catch (error) {
         console.error('AI查询失败:', error);
+        // 确保 catch 块也设置一个扁平的对象结构
         this.aiResult = {
           answer: `抱歉，查询过程中出现了错误：${error.message}`,
           data: [],
@@ -801,9 +777,16 @@ export default {
 }
 
 .ai-result-container {
-  max-height: 280px; /* 进一步增加结果容器高度 */
+  height: 280px; /* 使用固定高度而非max-height */
   overflow-y: auto;
-  margin-top: 5px; /* 减少顶部边距 */
+  margin-top: 5px;
+  -webkit-overflow-scrolling: touch; /* 改善移动端滚动体验 */
+  overscroll-behavior: contain; /* 防止滚动链 */
+}
+
+/* 修复iOS滚动回弹问题 */
+.ai-result-container > div {
+  min-height: 101%;
 }
 
 .ai-result {
@@ -947,6 +930,67 @@ export default {
   margin-right: 10px;
 }
 
+/* 微信社群样式 */
+.wechat-section {
+  margin-top: 20px;
+  margin-bottom: 30px;
+}
+
+.wechat-card {
+  border-radius: 15px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  border: none;
+  background: linear-gradient(120deg, #ffffff, #f8f9ff);
+}
+
+.wechat-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px;
+}
+
+.wechat-text {
+  flex: 1;
+  padding-right: 20px;
+}
+
+.wechat-text h3 {
+  margin: 0 0 15px;
+  color: #333;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.wechat-text p {
+  margin: 10px 0 20px;
+  color: #666;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.wechat-tips {
+  margin-top: 15px;
+}
+
+.wechat-tips .el-tag {
+  margin-right: 10px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+}
+
+.wechat-qrcode {
+  width: 180px;
+  height: 180px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+}
+
+.wechat-qrcode:hover {
+  transform: scale(1.05);
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .home-container {
@@ -975,6 +1019,28 @@ export default {
   .data-section .el-col {
     width: 100%;
     margin-bottom: 20px;
+  }
+  
+  /* 微信社群响应式样式 */
+  .wechat-content {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .wechat-text {
+    padding-right: 0;
+    margin-bottom: 20px;
+  }
+  
+  .wechat-qrcode {
+    width: 150px;
+    height: 150px;
+  }
+  
+  .wechat-tips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
   }
 }
 </style>
