@@ -19,8 +19,11 @@ def query_ai():
         prompt = data.get("prompt", "")
         if not prompt:
             return jsonify({"error": "请提供查询内容"}), 400
+            
+        user_id = data.get("user_id", "")
+        user_name = f"用户{user_id}" if user_id else "未知用户"
 
-        result = run_ai_query(prompt)
+        result = run_ai_query(prompt, user_name=user_name)
         return jsonify({"result": result})
     except Exception as e:
         error_msg = f"处理AI查询时出错: {str(e)}"

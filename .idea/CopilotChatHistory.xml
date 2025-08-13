@@ -4,6 +4,12 @@
     <option name="conversations">
       <list>
         <Conversation>
+          <option name="createTime" value="1755052837737" />
+          <option name="id" value="0198a14d0b6977f0a15349e273bc2550" />
+          <option name="title" value="新对话 2025年8月13日 10:40:37" />
+          <option name="updateTime" value="1755052837737" />
+        </Conversation>
+        <Conversation>
           <option name="createTime" value="1754879318092" />
           <option name="id" value="019896f55ed97aa89d9de84cedaa213f" />
           <option name="title" value="如果我希望调用api接口 增强我的数据库中的内容，例如选手的别称、全名；&#10;或者英雄的别称 全名， 我需要做什么；我该如何建立新的数据库 告诉我就可以 先不用写代码&#10;我是应该单独写脚本吗，我现在的工作流是实时根据日程在凌晨更新数据，我是更新mysql还是更新models里的内容；他们有什么区别" />
