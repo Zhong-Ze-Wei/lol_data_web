@@ -268,12 +268,15 @@
 </template>
 
 <script>
+import { UserIdentifier } from '@/services/userIdentifier';
+
 export default {
   name: 'Home',
   computed: {
   formattedAIResult() {
       if (this.aiResult && this.aiResult.answer) {
-        return this.aiResult.answer;
+        // 使用markdown解析显示回答
+        return this.renderMarkdown(this.aiResult.answer);
       }
       return '';
   }
@@ -298,14 +301,121 @@ export default {
       aiResult: '',
       aiLoading: false,
       aiStreaming: false,
-      streamInterval: null
+      streamInterval: null,
+      // 用户唯一标识ID
+      userId: ''
     };
   },
   mounted() {
     this.fetchFunData();
     this.fetchStats();
+    this.loadUserInfo();
   },
   methods: {
+    // 加载用户信息
+    loadUserInfo() {
+      // 使用UserIdentifier服务获取用户ID
+      this.userId = UserIdentifier.getUserId();
+      console.log('已加载用户ID:', this.userId);
+    },
+    
+    // 添加markdown解析方法
+    renderMarkdown(text) {
+      if (!text) return '';
+      
+      // 转义HTML特殊字符
+      let result = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      // 解析粗体 **text**
+      result = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      
+      // 解析斜体 *text*
+      result = result.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      
+      // 解析代码块 ```code```
+      result = result.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+
+      // 解析行内代码 `code`
+      result = result.replace(/`(.*?)`/g, '<code>$1</code>');
+
+      // 解析链接 [text](url)
+      result = result.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="player-link">$1</a>');
+
+      // 解析无序列表 - item
+      result = result.replace(/^(\s*)-\s+(.*)$/gm, '$1<li>$2</li>');
+      result = result.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+
+      // 解析有序列表 1. item
+      result = result.replace(/^(\s*)\d+\.\s+(.*)$/gm, '$1<li>$2</li>');
+      result = result.replace(/(<li>.*<\/li>)/gs, '<ol>$1</ol>');
+
+      // 解析标题 # title
+      result = result.replace(/^### (.*$)/gm, '<h3>$1</h3>');
+      result = result.replace(/^## (.*$)/gm, '<h2>$1</h2>');
+      result = result.replace(/^# (.*$)/gm, '<h1>$1</h1>');
+      
+      // 解析表格
+      if (result.includes('|')) {
+        // 提取表格部分
+        const tableRegex = /^\|(.+)\|[\r\n]+\|([-:\s|]+)\|[\r\n]+((?:\|.+\|[\r\n]+)+)/gm;
+        result = result.replace(tableRegex, function(match) {
+          // 分割表格行
+          const rows = match.trim().split('\n');
+          if (rows.length < 3) return match; // 不是有效的表格
+          
+          // 处理表头
+          const headerRow = rows[0].trim();
+          const headerCells = headerRow.split('|').filter(cell => cell.trim() !== '');
+          
+          // 处理分隔行（确定对齐方式）
+          const separatorRow = rows[1].trim();
+          const separators = separatorRow.split('|').filter(cell => cell.trim() !== '');
+          const alignments = separators.map(sep => {
+            if (sep.startsWith(':') && sep.endsWith(':')) return 'center';
+            if (sep.endsWith(':')) return 'right';
+            return 'left';
+          });
+          
+          // 构建表格HTML
+          let tableHtml = '<div class="table-responsive"><table class="markdown-table">';
+          
+          // 添加表头
+          tableHtml += '<thead><tr>';
+          headerCells.forEach((cell, index) => {
+            const align = alignments[index] || 'left';
+            tableHtml += `<th style="text-align:${align}">${cell.trim()}</th>`;
+          });
+          tableHtml += '</tr></thead>';
+          
+          // 添加表格内容
+          tableHtml += '<tbody>';
+          for (let i = 2; i < rows.length; i++) {
+            const row = rows[i].trim();
+            if (!row) continue;
+            
+            const cells = row.split('|').filter(cell => cell.trim() !== '');
+            tableHtml += '<tr>';
+            cells.forEach((cell, index) => {
+              const align = alignments[index] || 'left';
+              tableHtml += `<td style="text-align:${align}">${cell.trim()}</td>`;
+            });
+            tableHtml += '</tr>';
+          }
+          tableHtml += '</tbody></table></div>';
+          
+          return tableHtml;
+        });
+      }
+
+      // 解析换行
+      result = result.replace(/\n/g, '<br>');
+
+      return result;
+    },
+
     goToPlayers() {
       this.$router.push('/player');
     },
@@ -323,7 +433,7 @@ export default {
       this.aiStreaming = false;
       clearInterval(this.streamInterval);
     },
-    
+
     async submitAIQuery() {
       if (!this.aiQuery.trim()) {
         this.$message.warning('请输入问题内容');
@@ -340,7 +450,10 @@ export default {
         const response = await fetch('/api/ai/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: this.aiQuery.substring(0, 100) })
+          body: JSON.stringify({
+            prompt: this.aiQuery.substring(0, 100),
+            user_id: this.userId
+          })
         });
 
         if (!response.ok) {
@@ -410,18 +523,18 @@ export default {
         this.aiStreaming = false;
       }
     },
-    
+
     // 将文本分成小块，用于模拟流式输出
     chunkText(text) {
       // 如果文本很短，直接返回
       if (text.length < 50) return [text];
-      
+
       const chunks = [];
       // 不再添加开场白，直接进入正文
-      
+
       // 按句子或段落分割文本
       const sentences = text.split(/(?<=[.!?。！？])\s+/);
-      
+
       for (const sentence of sentences) {
         if (sentence.trim()) {
           // 如果句子很长，进一步分割
@@ -433,16 +546,16 @@ export default {
           }
         }
       }
-      
+
       return chunks;
     },
-    
+
     // 分割长句子
     splitLongSentence(sentence) {
       const parts = [];
       let currentPart = "";
       const words = sentence.split(" ");
-      
+
       for (const word of words) {
         if (currentPart.length + word.length > 50) {
           parts.push(currentPart);
@@ -451,11 +564,11 @@ export default {
           currentPart += word + " ";
         }
       }
-      
+
       if (currentPart) {
         parts.push(currentPart);
       }
-      
+
       return parts;
     },
     async fetchFunData() {
@@ -735,7 +848,7 @@ export default {
 /* AI查询窗口样式 */
 .ai-card {
   height: 520px; /* 进一步增加卡片高度 */
-  border-radius: 15px;
+  border-radius: 25px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
   border: none;
   background: linear-gradient(120deg, #ffffff, #f8f9ff);
@@ -745,21 +858,21 @@ export default {
   background: linear-gradient(90deg, #2a9d8f, #1d7874);
   color: white;
   border-radius: 8px 8px 0 0;
-  padding: 15px 20px;
+  padding: 12px 20px;
 }
 
 
 .ai-description {
-  font-size: 20px;
+  font-size: 15px;
   color: #666;
-  margin-bottom: 10px; /* 减少下边距 */
+  margin-bottom: 5px; /* 减少下边距 */
   text-align: center;
 }
 
 .player-link {
   color: #409EFF;
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 60;
 }
 
 .player-link:hover {
@@ -767,7 +880,7 @@ export default {
 }
 
 .ai-input {
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .ai-button {
@@ -789,12 +902,74 @@ export default {
   min-height: 101%;
 }
 
+/* 针对AI回答区域的紧凑型样式优化 */
 .ai-result {
   margin-top: 10px;
-  padding: 10px;
+  padding: 8px 10px; /* 减小内边距 */
   background: #e8f4f3;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 14px;   /* 设定基础字号 */
+  line-height: 1.35; /* 核心：全局减小行距 */
+}
+
+/* 段落样式 */
+.ai-result p {
+  margin: 4px 0; /* 极小的段落间距 */
+}
+
+/* 标题样式：大幅缩小字号和间距 */
+.ai-result h1, .ai-result h2, .ai-result h3, .ai-result h4 {
+  margin-top: 8px;    /* 标题前的间距略大 */
+  margin-bottom: 3px; /* 标题后的间距很小 */
+  line-height: 1.2;   /* 标题自身行距更紧凑 */
+  font-weight: 600;   /* 保持加粗以区分 */
+}
+
+.ai-result h1 { font-size: 1.2em; } /* 约 17px */
+.ai-result h2 { font-size: 1.1em; } /* 约 15.5px */
+.ai-result h3 { font-size: 1.05em; }/* 仅比正文略大 */
+.ai-result h4 { font-size: 1em; }  /* 与正文同样大小，仅加粗 */
+
+
+/* 列表样式 */
+.ai-result ul, .ai-result ol {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding-left: 18px; /* 减小列表缩进 */
+}
+
+.ai-result li {
+  margin: 2px 0; /* 极小的列表项间距 */
+}
+
+/* 代码块样式 */
+.ai-result pre {
+  margin: 5px 0;
+  padding: 6px 8px; /* 减小代码块内边距 */
+  background: #2d2d2d;
+  color: #f8f8f2;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.9em; /* 代码使用更小的字号 */
+}
+
+/* 行内代码样式 */
+.ai-result code {
+  background: #2d2d2d;
+  color: #f8f8f2;
+  padding: 1px 4px; /* 紧凑的内边距 */
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+/* 加粗和斜体 */
+.ai-result strong {
+  font-weight: bold;
+}
+
+.ai-result em {
+  font-style: italic;
 }
 
 /* 打字指示器动画 */
@@ -991,6 +1166,39 @@ export default {
   transform: scale(1.05);
 }
 
+/* Markdown表格样式 */
+.table-responsive {
+  overflow-x: auto;
+  margin: 15px 0;
+}
+
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+}
+
+.markdown-table th {
+  background-color: #f2f2f2;
+  font-weight: bold;
+  color: #333;
+}
+
+.markdown-table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.markdown-table tr:hover {
+  background-color: #f0f7fa;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .home-container {
@@ -1020,27 +1228,37 @@ export default {
     width: 100%;
     margin-bottom: 20px;
   }
-  
+
   /* 微信社群响应式样式 */
   .wechat-content {
     flex-direction: column;
     text-align: center;
   }
-  
+
   .wechat-text {
     padding-right: 0;
     margin-bottom: 20px;
   }
-  
+
   .wechat-qrcode {
     width: 150px;
     height: 150px;
   }
-  
+
   .wechat-tips {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
+  }
+  
+  /* 小屏幕上的表格样式 */
+  .markdown-table {
+    font-size: 12px;
+  }
+  
+  .markdown-table th,
+  .markdown-table td {
+    padding: 6px 8px;
   }
 }
 </style>

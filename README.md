@@ -123,14 +123,15 @@ npm run serve
 http://127.0.0.1:5000
 ```
 
-## 穿透部署方案
+## 穿透部署方案 在cmd中
 使用nginx
  ```
  cd /d E:\nginx\nginx-1.28.0
  start nginx
  ```
- 使用ngrok
+使用ngrok
  ```
+cd /d F:\work
 ngrok http 80
  ```
 ---
