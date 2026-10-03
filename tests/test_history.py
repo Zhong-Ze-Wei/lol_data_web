@@ -5,13 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
 from app.models.sync import HistoryTournament, HistoryStage, HistorySeries, SyncTask, utc_now
 from app.services.history import coverage_report, repair_archived_results, repair_verified_raw
-from app.services import history
+from app.services import history, ingestion
 from app.services.ingestion import ingest_result, normalize_result
 from app.services.source_identity import build_source_name_index
 from app.services.spider import RequestBudget, ScoreGGClient, SourceHTTPError
@@ -35,6 +36,12 @@ def identity_result(result):
         result['data']['teams'].append({'playerID': identifier, 'color': side,
                                        'nickname': result['data']['result_list'][f'{side}_star_{position}_name']})
     return result
+
+
+@pytest.fixture
+def legacy_partial_result():
+    # 原件最小投影，SHA256: 5d381a6c6ab18433ff38a28d796a0546853f974c6d49e2cefea775af610755a2。
+    return json.loads((Path(__file__).parent / 'fixtures' / 'scoregg_result_18894_partial.json').read_text(encoding='utf-8'))
 
 
 class HistoricalSource:
@@ -297,6 +304,241 @@ def test_known_unmapped_legacy_ids_are_checked_and_nonlol_cannot_survive(db, res
     assert db.session.query(SyncTask).one().status == 'skipped'
     assert (tmp_path / 'raw' / 'scoregg' / '42.json').is_file()
     assert report['details']['coverage']['counts']['known_unmapped_results']['skipped'] == 1
+
+
+@pytest.mark.parametrize('cached', [False, True])
+def test_unmapped_finished_legacy_partial_keeps_reliable_rows_without_refetch_or_guessed_identity(
+        db, legacy_partial_result, tmp_path, cached):
+    db.session.add(Match(match_id=18894, source='legacy', verified=False, game_time=999))
+    db.session.add_all([
+        Team(match_id=18894, team_name='LM', game_time=999, attack=777),
+        Team(match_id=18894, team_name='PE', player_c_id='CSV guessed identity'),
+        Team(match_id=18894, team_name='obsolete team'),
+        Player(match_id=18894, team_name='LM', position='a', name='CSV stale name', kills=99,
+               atk=888, pic='CSV stale picture', game_time=999),
+        Player(match_id=18894, team_name='PE', position='c', name='CSV guessed identity'),
+        Player(match_id=18894, team_name='obsolete team', position='wrong', name='obsolete player'),
+    ])
+    db.session.commit()
+    assert history._seed_known_legacy() == 1
+    task = db.session.query(SyncTask).one()
+    assert task.series_id is None
+    source = HistoricalSource(legacy_partial_result)
+    raw = tmp_path / 'raw' / 'scoregg' / '18894.json'
+    before = copy.deepcopy(legacy_partial_result)
+    if cached:
+        raw.parent.mkdir(parents=True)
+        raw.write_text(json.dumps(legacy_partial_result), encoding='utf-8')
+    outcome = history._fetch_task(source, task, tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'source_incomplete' and outcome['reused_raw'] is cached
+    assert source.calls == ([] if cached else ['result/18894'])
+    assert legacy_partial_result == before and json.loads(raw.read_text(encoding='utf-8')) == before
+    match = db.session.query(Match).one()
+    assert match.source == 'scoregg' and match.verified and match.game_time is None
+    assert match.win_team_name == 'PE' and match.date_source == 'updated_at'
+    assert match.date == datetime(2022, 3, 9, 18, 59, 28)  # 只存源更新时间，绝不冒充赛程或赛年。
+    assert db.session.query(Team).count() == 2 and db.session.query(Player).count() == 9
+    player = db.session.query(Player).filter_by(team_name='LM', position='a').one()
+    assert player.name == 'Yao' and player.kills == 0 and player.kda == 1.4
+    assert player.atk is None and player.pic is None and player.game_time is None
+    assert db.session.query(Player).filter_by(team_name='PE', position='c').count() == 0
+    assert db.session.query(Team).filter_by(team_name='PE').one().player_c_id is None
+    assert all(team.attack is None and team.money is None for team in db.session.query(Team))
+    assert all(player.atk is None and player.money is None and player.hits is None for player in db.session.query(Player))
+    assert task.failure_count == 0 and task.next_retry_at is None
+    assert history._next_all(max_attempts=5) == (None, None)
+    identities = {(player.team_name, player.position): player.id for player in db.session.query(Player)}
+    assert ingest_result(before, 18894, allow_incomplete=True).status == 'source_incomplete'
+    assert {(player.team_name, player.position): player.id for player in db.session.query(Player)} == identities
+    assert db.session.query(Team).count() == 2 and db.session.query(Player).count() == 9
+    coverage = coverage_report()
+    assert coverage['complete_available'] is False
+    assert coverage['counts']['known_unmapped_results'] == {'source_incomplete': 1}
+    assert coverage['legacy']['unverified_matches'] == 0
+
+
+def test_unmapped_legacy_missing_name_with_valid_duration_is_saved_as_partial(db, legacy_partial_result, tmp_path):
+    legacy_partial_result['data']['result_list'].update(game_time_m='30', game_time_s='00')
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    source = HistoricalSource(legacy_partial_result)
+    outcome = history._fetch_task(source, db.session.query(SyncTask).one(), tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'source_incomplete'
+    assert db.session.query(Match).one().game_time == 1800
+    assert db.session.query(Team).count() == 2 and db.session.query(Player).count() == 9
+
+
+@pytest.mark.parametrize('case,expected', [
+    ('unknown_winner', 'pending'), ('both_winners', 'pending'), ('missing_gameID', 'failed'),
+    ('non_lol', 'skipped'), ('bad_response', 'failed'), ('empty_detail', 'pending'),
+    ('wrong_result_id', 'failed'), ('wrong_winner_id', 'pending'), ('missing_winner_id', 'pending'),
+    ('contradictory_kills', 'pending'),
+])
+def test_unmapped_legacy_partial_requires_source_lol_and_finished_evidence(db, legacy_partial_result, tmp_path, case, expected):
+    data = legacy_partial_result['data']
+    info = data['result_list']
+    if case == 'unknown_winner':
+        info['blue_result'] = '0'
+    elif case == 'both_winners':
+        info['red_result'] = '1'
+    elif case == 'missing_gameID':
+        del data['gameID']
+    elif case == 'non_lol':
+        data['gameID'] = '2'
+    elif case == 'bad_response':
+        legacy_partial_result['code'] = 500
+    elif case == 'empty_detail':
+        legacy_partial_result['data'] = {}
+    elif case == 'wrong_result_id':
+        data['resultID'] = '18895'
+    elif case == 'wrong_winner_id':
+        info['win_teamID'] = info['red_teamID']
+    elif case == 'missing_winner_id':
+        del info['win_teamID']
+    elif case == 'contradictory_kills':
+        info['blue_kill'] = '30'
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    source = HistoricalSource(legacy_partial_result)
+    outcome = history._fetch_task(source, db.session.query(SyncTask).one(), tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == expected and outcome['status'] != 'source_incomplete'
+    assert db.session.query(Team).count() == 0 and db.session.query(Player).count() == 0
+    if expected == 'skipped':
+        assert db.session.query(Match).count() == 0
+    else:
+        match = db.session.query(Match).one()
+        assert match.source == 'legacy' and match.verified is False
+
+
+def test_unmapped_arbitrary_task_does_not_gain_legacy_partial_permission(db, legacy_partial_result, tmp_path):
+    db.session.add(SyncTask(task_key='result:18894', result_id=18894))
+    db.session.commit()
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), db.session.query(SyncTask).one(),
+                                  tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'pending' and db.session.query(Match).count() == 0
+
+
+@pytest.mark.parametrize('source_name,verified', [('scoregg', False), ('scoregg', True), ('legacy', True)])
+def test_existing_nonlegacy_or_verified_match_does_not_gain_unmapped_partial_permission(
+        db, legacy_partial_result, tmp_path, source_name, verified):
+    db.session.add(Match(match_id=18894, source=source_name, verified=verified, game_time=999))
+    db.session.add(SyncTask(task_key='result:18894', result_id=18894))
+    db.session.commit()
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), db.session.query(SyncTask).one(),
+                                  tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'pending'
+    match = db.session.query(Match).one()
+    assert match.source == source_name and match.verified is verified and match.game_time == 999
+
+
+@pytest.mark.parametrize('fresh_finished', [False, True])
+def test_unmapped_partial_permission_is_recomputed_for_fresh_response(db, legacy_partial_result, tmp_path, fresh_finished):
+    cached = copy.deepcopy(legacy_partial_result)
+    fresh = copy.deepcopy(legacy_partial_result)
+    if fresh_finished:
+        cached['data']['result_list']['blue_result'] = '0'
+    else:
+        # 缓存有明确胜方但无法规范化；它的放宽资格不能泄漏给新取的未结束响应。
+        cached['data']['result_list']['red_star_a_kda'] = '-1'
+        fresh['data']['result_list']['blue_result'] = '0'
+    raw = tmp_path / 'raw' / 'scoregg' / '18894.json'
+    raw.parent.mkdir(parents=True)
+    raw.write_text(json.dumps(cached), encoding='utf-8')
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    source = HistoricalSource(fresh)
+    outcome = history._fetch_task(source, db.session.query(SyncTask).one(), tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == ('source_incomplete' if fresh_finished else 'pending')
+    assert outcome['reused_raw'] is False and source.calls == ['result/18894']
+    assert db.session.query(Player).count() == (9 if fresh_finished else 0)
+
+
+@pytest.mark.parametrize('kills_state', ['missing_one', 'missing_all', 'zero_all'])
+def test_unmapped_finished_legacy_can_keep_partial_with_missing_or_zero_kills(db, legacy_partial_result, tmp_path, kills_state):
+    info = legacy_partial_result['data']['result_list']
+    if kills_state == 'missing_one':
+        del info['red_star_a_kills']
+    else:
+        for side in ('red', 'blue'):
+            fields = [f'{side}_kill'] + [f'{side}_star_{position}_kills' for position in 'abcde']
+            for field in fields:
+                if kills_state == 'zero_all':
+                    info[field] = '0'
+                else:
+                    del info[field]
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), db.session.query(SyncTask).one(),
+                                  tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'source_incomplete'
+    match = db.session.query(Match).one()
+    assert match.verified and match.win_team_name == 'PE' and match.game_time is None
+    assert db.session.query(Team).count() == 2 and db.session.query(Player).count() == 9
+    player = db.session.query(Player).filter_by(team_name='LM', position='a').one()
+    assert player.kills == (0 if kills_state == 'zero_all' else None)
+
+
+@pytest.mark.parametrize('days_ago', [-1, 1, 14])
+def test_unmapped_legacy_with_recent_or_future_known_schedule_stays_strict(db, legacy_partial_result, tmp_path, days_ago):
+    now = datetime(2026, 10, 3)
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    task = db.session.query(SyncTask).one()
+    task.scheduled_at = now - timedelta(days=days_ago)
+    db.session.commit()
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), task, tmp_path / 'raw', None, now)
+    assert outcome['status'] == 'pending' and db.session.query(Match).one().verified is False
+
+
+@pytest.mark.parametrize('source_status,days_ago,expected', [
+    ('2', 15, 'source_incomplete'), ('2', None, 'source_incomplete'),
+    ('2', 14, 'pending'), ('2', 1, 'pending'), ('2', -1, 'pending'),
+    ('1', 30, 'pending'), ('0', 30, 'pending'),
+])
+def test_known_series_keeps_existing_age_and_live_constraints(db, legacy_partial_result, tmp_path, source_status, days_ago, expected):
+    now = datetime(2026, 10, 3)
+    db.session.add(HistoryTournament(tournament_id=333, name='fixture tournament'))
+    db.session.commit()
+    stage = HistoryStage(tournament_id=333, cache_key='p_765', parent_round_id=765)
+    db.session.add(stage)
+    db.session.flush()
+    db.session.add(HistorySeries(series_id=9057, tournament_id=333, stage_id=stage.id,
+                                 source_status=source_status, is_publist=1,
+                                 scheduled_at=None if days_ago is None else now - timedelta(days=days_ago)))
+    db.session.add(Match(match_id=18894, source='legacy', verified=False))
+    db.session.commit()
+    history._seed_known_legacy()
+    task = db.session.query(SyncTask).one()
+    task.series_id = 9057
+    db.session.commit()
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), task, tmp_path / 'raw', None, now)
+    assert outcome['status'] == expected
+
+
+def test_unmapped_partial_transaction_failure_preserves_existing_business_rows(db, legacy_partial_result, tmp_path, monkeypatch):
+    db.session.add(Match(match_id=18894, source='legacy', verified=False, game_time=999))
+    db.session.add(Player(match_id=18894, team_name='LM', position='a', name='CSV name', kills=99))
+    db.session.commit()
+    history._seed_known_legacy()
+    original_upsert = ingestion.bulk_upsert
+
+    def fail_player_write(model, rows, keys, **kwargs):
+        if model is Player:
+            raise IntegrityError('fixture player write', {}, Exception('fixture transaction failure'))
+        return original_upsert(model, rows, keys, **kwargs)
+
+    monkeypatch.setattr(ingestion, 'bulk_upsert', fail_player_write)
+    outcome = history._fetch_task(HistoricalSource(legacy_partial_result), db.session.query(SyncTask).one(),
+                                  tmp_path / 'raw', None, datetime(2026, 10, 3))
+    assert outcome['status'] == 'failed'
+    match = db.session.query(Match).one()
+    assert match.source == 'legacy' and match.verified is False and match.game_time == 999
+    assert db.session.query(Team).count() == 0 and db.session.query(Player).one().kills == 99
 
 
 def test_unmapped_source_incomplete_prevents_complete_claim(db, result, tmp_path):

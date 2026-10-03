@@ -72,6 +72,41 @@ def _winner(value, field):
     return parsed
 
 
+def has_finished_lol_evidence(payload, result_id):
+    """无赛程旧单局的结束证据；缺证据仍走严格校验，不猜赛年或结束状态。"""
+    if not isinstance(payload, dict) or payload.get('code') not in (200, '200'):
+        return False
+    data = payload.get('data')
+    if not isinstance(data, dict) or str(data.get('gameID')) != '1':
+        return False
+    info = data.get('result_list')
+    if not isinstance(info, dict):
+        return False
+    names = [info.get(f'{side}_name') for side in ('red', 'blue')]
+    if any(not isinstance(name, str) or not name.strip() for name in names) or names[0] == names[1]:
+        return False
+    try:
+        if data.get('resultID') and int(data['resultID']) != int(result_id):
+            return False
+        results = {side: _winner(info.get(f'{side}_result'), f'{side}_result') for side in ('red', 'blue')}
+        if sum(results.values()) != 1:
+            return False
+        ids = {side: numeric(info.get(f'{side}_teamID'), f'{side}_teamID', integer=True, required=True)
+               for side in ('red', 'blue')}
+        winner_id = numeric(info.get('win_teamID'), 'win_teamID', integer=True, required=True)
+        if min(ids.values()) <= 0 or ids['red'] == ids['blue'] or winner_id != ids[next(side for side in ids if results[side])]:
+            return False
+        for side in ('red', 'blue'):
+            kills = numeric(info.get(f'{side}_kill'), f'{side}_kill', integer=True)
+            slot_kills = [numeric(info.get(f'{side}_star_{pos}_kills'), f'{side}_star_{pos}_kills', integer=True)
+                          for pos in 'abcde']
+            if kills is not None and all(value is not None for value in slot_kills) and kills != sum(slot_kills):
+                return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def _source_duration(info, allow_incomplete, missing):
     try:
         minutes = numeric(info.get('game_time_m'), 'game_time_m', integer=True, required=not allow_incomplete)
