@@ -8,7 +8,7 @@ from app import db
 from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
-from app.services.query_semantics import DIMENSIONS, GRAINS, METRICS, POSITIONS
+from app.services.query_semantics import DIMENSIONS, GRAINS, METRICS, POSITIONS, TEAM_NAME_DEFINITION
 from app.services.stat_metrics import per_minute_value
 
 
@@ -188,7 +188,7 @@ def compile_plan(plan):
 
 
 def result_columns(plan):
-    columns = [{"key": key, "label": DIMENSIONS[key], "type": "date" if key in {"day", "month", "year"} else "string", "unit": "", "definition": ""} for key in plan["dimensions"]]
+    columns = [{"key": key, "label": DIMENSIONS[key], "type": "date" if key in {"day", "month", "year"} else "string", "unit": "", "definition": TEAM_NAME_DEFINITION if key in {"team", "opponent", "winner"} else ""} for key in plan["dimensions"]]
     for key in plan["metrics"]:
         definition = METRICS[plan["subject"]][key]
         columns.append({"key": key, "label": definition["label"], "type": "number", "unit": definition["unit"], "definition": definition["definition"] or "仅对已知值计算，缺失值不算零。"})

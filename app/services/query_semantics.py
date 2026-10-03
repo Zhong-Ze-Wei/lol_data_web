@@ -19,11 +19,16 @@ POSITION_ALIASES = {
     "中单": "c", "mid": "c", "下路": "d", "adc": "d", "辅助": "e", "support": "e",
 }
 GRAINS = {"player": "选手单局出场", "team": "战队单局出场", "match": "一局比赛（非 BO 系列）"}
+TEAM_NAME_DEFINITION = (
+    "每条出场或比赛记录保存的来源队伍标签，包含未核验的历史导入标签；"
+    "可能与历史赛程名称不同，不代表已核实的当年正式队名。"
+    "按记录标签分别统计，不自动合并，也不据此推断官方转会或更名。"
+)
 DIMENSIONS = {
-    "player": "选手", "team": "比赛所属战队", "hero": "英雄", "position": "位置",
-    "opponent": "对手战队", "tournament": "赛事", "day": "比赛日", "month": "比赛月份",
+    "player": "选手", "team": "来源战队", "hero": "英雄", "position": "位置",
+    "opponent": "对手来源战队", "tournament": "赛事", "day": "比赛日", "month": "比赛月份",
     "year": "比赛年份", "match_id": "单局编号", "series_id": "BO 系列编号",
-    "winner": "获胜战队",
+    "winner": "获胜来源战队",
 }
 SUBJECT_DIMENSIONS = {
     "player": {"player", "team", "hero", "position", "opponent", "tournament", "day", "month", "year", "match_id", "series_id"},
@@ -334,7 +339,7 @@ def semantic_catalog():
         } for subject, metrics in METRICS.items()},
         "positions": POSITIONS,
         "rules": [
-            "历史战队名不自动合并；team是比赛当局所属战队，不能当成当前所属战队。",
+            TEAM_NAME_DEFINITION,
             "时间筛选/趋势只用真实赛程日期date_source=schedule；updated_at不能作为比赛年份、赛季或补丁。",
             "赛事只能用实际tournament_name；缺失赛事归属不能据日期推断赛季/赛区。",
             "联赛/世界赛聚合用filters.tournament_contains文字片段数组，按真实赛事名文字匹配，不推断赛区；全球总决赛可用全球总决赛/世界总决赛/Worlds。",

@@ -16,7 +16,7 @@ from sqlglot.optimizer.scope import traverse_scope
 from app import db
 from app.services.query_compiler import chart_metadata, compile_plan, result_columns
 from app.services.query_semantics import (
-    GRAINS, METRICS, InvalidPlan, UnsafePlan, candidate_entities, entity_catalog,
+    DIMENSIONS, GRAINS, METRICS, TEAM_NAME_DEFINITION, InvalidPlan, UnsafePlan, candidate_entities, entity_catalog,
     parse_plan, resolve_entities, semantic_catalog, unsupported_question, validate_context,
 )
 
@@ -157,8 +157,10 @@ def planning_system():
         "filters可用player/team/hero/position/opponent/tournament/tournament_contains字符串数组，"
         "date_start/date_end字符串、verified_only布尔。position用a-e。"
         "单人/两人比较、英雄池、趋势/汇总通常min_games=1；均值/胜率排行默认min_games=10，用户明确门槛优先。"
-        "按出场局数排行可min_games=1。对比Faker与Chovy选择player维度；转会前后用player/team维度，"
-        "表示比赛当局所属队而非官方转会日期。直接交手用team维度，team与opponent同时筛选双方名称。"
+        "按出场局数排行可min_games=1。对比Faker与Chovy选择player维度；按不同来源队伍标签比较用player/team维度。"
+        "team/opponent/winner都是记录中的来源队伍标签，可能与历史赛程名称不同，"
+        "不得当作已核实的当年正式队名，不依据标签推断官方转会或更名。"
+        "直接交手用team维度，team与opponent同时筛选双方来源标签，不自动合并名称。"
         "每个位置前三名：dimensions=[position,player],per_group_top_n={partition_by:[position],n:3}。"
         "英雄使用次数按hero维度games；不要宣称有禁用数据。月份趋势用month维度升序，年度用year。"
         "date或年月日维度仅使用真实赛程日期；不能用来源更新时间代替比赛时间。"
@@ -205,7 +207,7 @@ def strength_clarification(user_prompt):
 def query_assumptions(plan, evidence, rows):
     assumptions = [
         f"统计粒度：{GRAINS[plan['subject']]}；比较的是已收录样本，不代表赛事全量或绝对实力。",
-        "战队字段表示比赛当局所属战队；历史战队名分别统计，不自动合并，也不推断官方转会日期。",
+        TEAM_NAME_DEFINITION,
         f"{'仅使用已核验记录' if plan['filters'].get('verified_only') else '包含已收录的未核验历史数据'}；"
         f"核验{evidence['verified_matches']}局，未核验{evidence['unverified_matches']}局。",
         f"每组至少{plan['min_games']}次出场；最多展示{plan['limit']}组，均值不把缺失项当0。",
@@ -239,7 +241,8 @@ def deterministic_answer(plan, data, evidence):
     if not data:
         return f"筛选范围有{evidence['rows']}次样本，但没有分组达到至少{plan['min_games']}次出场（均值/比率榜含排序指标有效样本）的门槛。没有降低样本要求，请调整范围或明确更改门槛。"
     first = data[0]
-    name = " / ".join(str(first[key]) for key in plan["dimensions"]) or "当前筛选范围"
+    name = " / ".join(f"{DIMENSIONS[key]} {first[key]}" if key in {"team", "opponent", "winner"}
+                      else str(first[key]) for key in plan["dimensions"]) or "当前筛选范围"
     facts = []
     for key in plan["metrics"]:
         definition = METRICS[plan["subject"]][key]
@@ -381,6 +384,8 @@ def run_ai_query(user_prompt, user_name="", request_id=None, context=None):
                 "用中文Markdown最多三条短句、合计不超过200字说明主要差异及有效样本，不重复整张表。"
                 "不得将单项指标称为绝对实力，不得给缺失指标补0，"
                 "不得把历史更新时间当真实比赛日期，不得补充不存在的赛区/赛季/版本/转会事实。"
+                "team/opponent/winner是来源记录的队伍标签（含历史导入），涉及名称时称来源战队；"
+                "可能与历史赛程名称不同，不得当作已核实的当年正式队名，不据此推断官方转会或更名。"
                 "胜率使用已知胜负分母；KDA严格使用提供的口径；小样本注明局限。",
                 json.dumps({"question": user_prompt, "rows": data, "columns": columns, "evidence": evidence, "assumptions": assumptions}, ensure_ascii=False, default=str),
             )
