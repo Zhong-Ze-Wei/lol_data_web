@@ -358,14 +358,25 @@ def _discover_resultlist(client, series, raw_dir, now):
         _finish(series, 'discovered', raw=raw)
 
 
-def _refresh_due_pending():
+def _pending_stage_refreshes(max_attempts, *, due_only=True):
+    """待发布系列只能通过未耗尽、未处于失败退避的父阶段刷新。"""
+    series = db.session.query(HistorySeries.stage_id).filter(HistorySeries.status == 'pending')
+    if due_only:
+        series = series.filter(HistorySeries.next_retry_at <= utc_now())
+    return db.session.query(HistoryStage).filter(
+        HistoryStage.id.in_(series), HistoryStage.failure_count < max_attempts,
+        HistoryStage.status.in_(['queued', 'failed', 'pending', 'discovered']),
+        or_(HistoryStage.status != 'failed', HistoryStage.next_retry_at.is_(None),
+            HistoryStage.next_retry_at <= utc_now()),
+    )
+
+
+def _refresh_due_pending(max_attempts=5):
     # 只有读取阶段赛程才能知道 pub0 是否变化；不能凭持久错误文本猜测。
-    ids = [sid for (sid,) in db.session.query(HistorySeries.stage_id).filter(
-        HistorySeries.status == 'pending', HistorySeries.next_retry_at <= utc_now()).distinct()]
-    for stage in db.session.query(HistoryStage).filter(HistoryStage.id.in_(ids)).all():
+    for stage in _pending_stage_refreshes(max_attempts).all():
         stage.status, stage.next_retry_at = 'queued', None
-    for stage in db.session.query(HistoryStage).filter_by(status='pending').filter(
-            HistoryStage.next_retry_at <= utc_now()).all():
+    for stage in _ready(db.session.query(HistoryStage).filter_by(status='pending'), HistoryStage,
+                        max_attempts, include_pending=True).all():
         stage.status, stage.next_retry_at = 'queued', None
     for tour in db.session.query(HistoryTournament).filter_by(status='discovered').filter(
             HistoryTournament.next_retry_at <= utc_now()).all():
@@ -736,8 +747,12 @@ def coverage_report(max_attempts=5):
         years[key]['failed_tasks'] += count
     unseeded_legacy = db.session.query(Match).outerjoin(SyncTask, SyncTask.result_id == Match.match_id).filter(
         Match.source == 'legacy', Match.verified.is_(False), SyncTask.id.is_(None)).count()
-    ready = sum(_ready(db.session.query(model), model, max_attempts, include_pending=True).count()
-                for model in (HistoryTournament, HistoryStage, HistorySeries))
+    ready = _ready(db.session.query(HistoryTournament), HistoryTournament, max_attempts, include_pending=True).count()
+    ready += _ready(db.session.query(HistorySeries), HistorySeries, max_attempts).count()
+    # pending 系列实际要刷新阶段；同一阶段只计一次，不能把受阻系列当可运行任务。
+    stage_ids = _ready(db.session.query(HistoryStage.id), HistoryStage, max_attempts, include_pending=True).union(
+        _pending_stage_refreshes(max_attempts).with_entities(HistoryStage.id)).subquery()
+    ready += db.session.query(func.count()).select_from(stage_ids).scalar()
     ready += db.session.query(HistoryTournament).filter_by(status='discovered').filter(
         HistoryTournament.next_retry_at <= utc_now()).count()
     ready += _ready(db.session.query(SyncTask).filter(SyncTask.result_id.is_not(None)), SyncTask,
@@ -758,7 +773,15 @@ def coverage_report(max_attempts=5):
         model.status.in_(['pending', 'failed', 'discovered']), model.failure_count < max_attempts,
         model.next_retry_at > utc_now(),
         model.result_id.is_not(None) if model is SyncTask else True).scalar()
-        for model in (HistoryTournament, HistoryStage, HistorySeries, SyncTask)]
+        for model in (HistoryTournament, HistoryStage, SyncTask)]
+    deadlines.append(db.session.query(func.min(HistorySeries.next_retry_at)).filter(
+        HistorySeries.status.in_(['failed', 'discovered']), HistorySeries.failure_count < max_attempts,
+        HistorySeries.next_retry_at > utc_now()).scalar())
+    # 失败父阶段的退避时间由其自身提供；受阻系列不能提前唤醒空批次。
+    deadlines.append(db.session.query(func.min(HistorySeries.next_retry_at)).filter(
+        HistorySeries.status == 'pending', HistorySeries.failure_count < max_attempts,
+        HistorySeries.next_retry_at > utc_now(), HistorySeries.stage_id.in_(
+            _pending_stage_refreshes(max_attempts, due_only=False).with_entities(HistoryStage.id))).scalar())
     next_retry = min((value for value in deadlines if value is not None), default=None)
     exhausted = sum(db.session.query(model).filter(model.status == 'failed', model.failure_count >= max_attempts,
                     model.result_id.is_not(None) if model is SyncTask else True).count()
@@ -784,7 +807,7 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
     recover_interrupted_history()
     outcomes, details = [], {'phase': phase, 'scope': 'all_catalog_tournaments'}
     _seed_catalog(client, raw_dir, refresh)
-    _refresh_due_pending()
+    _refresh_due_pending(max_attempts)
     budget_error = None
     current = None
     try:
