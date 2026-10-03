@@ -1,19 +1,56 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { request } from "./services/api.js";
 import { useResource } from "./composables/useResource.js";
 import { number, date, timestamp } from "./utils/format.js";
+import { syncFeedback } from "./utils/history.js";
 import Icon from "./components/Icon.vue";
 
 const router = useRouter();
 const searchName = ref("");
 const {
-  data: sync,
+  data: currentSync,
   loading,
   error,
   reload,
-} = useResource((signal) => request("/api/sync/status", { signal }));
+} = useResource(async (signal) => {
+  const requestedAt = performance.now();
+  const result = await request("/api/sync/status", { signal });
+  return { result, requestedAt, receivedAt: performance.now() };
+});
+const latestSync = shallowRef(null);
+const stateRequestedAt = ref(performance.now());
+const clock = ref(stateRequestedAt.value);
+const updatedAt = ref(null);
+const statusUnavailable = ref(false);
+watch(error, (value) => {
+  if (value) statusUnavailable.value = true;
+});
+watch(currentSync, (value) => {
+  if (value) {
+    latestSync.value = value.result;
+    // 整次请求耗时计入保守心跳年龄；新请求挂起时仍沿用上一成功响应的起点。
+    stateRequestedAt.value = value.requestedAt;
+    clock.value = value.receivedAt;
+    updatedAt.value = new Date().toISOString();
+    statusUnavailable.value = false;
+  }
+});
+const sync = computed(() => currentSync.value?.result || latestSync.value);
+const feedback = computed(() =>
+  syncFeedback(sync.value, (clock.value - stateRequestedAt.value) / 1000),
+);
+const clockTimer = setInterval(() => {
+  clock.value = performance.now();
+}, 15000);
+const refreshTimer = setInterval(() => {
+  if (!loading.value) reload();
+}, 30000);
+onScopeDispose(() => {
+  clearInterval(clockTimer);
+  clearInterval(refreshTimer);
+});
 const nav = [
   ["/", "首页"],
   ["/match", "比赛"],
@@ -22,26 +59,6 @@ const nav = [
   ["/hero", "英雄"],
   ["/analytics", "数据分析"],
 ];
-const labels = {
-  success: "最近采集已完成",
-  completed: "最近采集已完成",
-  running: "最近采集未完成",
-  partial: "部分完成",
-  failed: "采集失败",
-  cancelled: "已停止",
-  budget_exhausted: "最近批次待续采",
-  interrupted: "采集已中断，等待恢复",
-  waiting_retry: "等待重试",
-  stale: "源站暂无近期赛程",
-};
-const syncLabel = computed(() =>
-  sync.value?.last_run
-    ? labels[sync.value.last_run.status] || sync.value.last_run.status
-    : "等待首次采集",
-);
-const updatedAt = computed(
-  () => sync.value?.last_run?.finished_at || sync.value?.last_run?.started_at,
-);
 function search() {
   if (searchName.value.trim())
     router.push({
@@ -84,15 +101,19 @@ function search() {
       <span
         class="sync-indicator"
         :class="{
-          failed: error || sync?.last_run?.status === 'failed',
-          running: ['running', 'partial'].includes(sync?.last_run?.status),
+          failed: statusUnavailable || feedback.failed,
+          running: !statusUnavailable && !feedback.failed && feedback.running,
         }"
       ></span
       ><span>{{
-        loading ? "读取采集状态…" : error ? "采集状态暂不可用" : syncLabel
+        statusUnavailable
+          ? "采集状态暂不可用"
+          : loading && !sync
+            ? "读取采集状态…"
+            : feedback.label
       }}</span
       ><span v-if="updatedAt" class="sync-time"
-        >最近更新 {{ timestamp(updatedAt) }}（香港时间）</span
+        >采集状态更新 {{ timestamp(updatedAt) }}（香港时间）</span
       ><span v-if="sync?.data_range?.min_date" class="sync-range"
         >已确认赛程：{{ date(sync.data_range.min_date) }} 至
         {{ date(sync.data_range.max_date) }}</span
