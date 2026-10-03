@@ -187,13 +187,13 @@ const fields = [
         <p class="muted small-text">
           {{
             progress.scope
-          }}。逐年统计按已确认赛程，未知日期单列；目录内战报与未关联旧任务分别统计。完整战报需合法时长、10位选手与2支战队，且源数据无缺项。
+          }}。目录和阶段按赛事开始年，系列及单局按已确认赛程，未知日期单列；失败统计包含各层级任务及未关联旧单局。目录内战报与未关联旧任务分别统计。完整战报需合法时长、10位选手与2支战队，且源数据无缺项。
         </p>
         <div v-if="progress.years?.length" class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>赛程年份</th>
+                <th>年份</th>
                 <th v-for="[, label] in fields" :key="label" class="numeric">
                   {{ label }}
                 </th>
