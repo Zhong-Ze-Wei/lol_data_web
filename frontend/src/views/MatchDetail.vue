@@ -25,6 +25,9 @@ const resource = useResource(
 );
 const match = computed(() => resource.data.value?.match);
 const players = computed(() => resource.data.value?.players || []);
+const hasDamage = computed(() =>
+  players.value.some((player) => player.atk != null),
+);
 const qualityNotice = computed(() => {
   if (!match.value) return "";
   const notes = [];
@@ -35,8 +38,18 @@ const qualityNotice = computed(() => {
         : "历史记录阵容不完整，个人统计仅包含已收录选手",
     );
   }
-  if (match.value.game_time == null || match.value.game_time <= 0) {
+  if (match.value.game_time == null || match.value.game_time <= 1) {
     notes.push("缺少可信比赛时长，分均指标未计算");
+  }
+  const missingMetrics = [
+    ["atk", "伤害"],
+    ["money", "经济"],
+    ["hits", "补刀"],
+  ]
+    .filter(([key]) => players.value.some((player) => player[key] == null))
+    .map(([, label]) => label);
+  if (missingMetrics.length) {
+    notes.push(`部分${missingMetrics.join("、")}数据缺失，空值未计为零`);
   }
   return notes.length ? `${notes.join("；")}。` : "";
 });
@@ -246,10 +259,12 @@ const damage = computed(() => {
           <span class="tag">本场原始值</span>
         </header>
         <Chart
+          v-if="hasDamage"
           :option="damage"
           label="本场已收录选手对英雄总伤害条形图"
           :height="380"
         />
+        <p v-else class="muted">本场没有可信伤害记录，未生成伤害图。</p>
         <p class="chart-note">
           伤害受英雄、位置、阵容与比赛时长影响。以上数据仅描述本场比赛。
         </p>

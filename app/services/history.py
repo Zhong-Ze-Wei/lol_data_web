@@ -384,6 +384,7 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
             item['source_incomplete'] = normalized.get('source_incomplete', [])
             item['missing_roster_slots'] = normalized.get('missing_roster_slots', [])
             item['recovered_player_names'] = normalized.get('recovered_player_names', [])
+            item['invalid_metric_groups'] = normalized.get('invalid_metric_groups', [])
         except (OSError, ValueError, TypeError) as exc:
             item.update(status='blocked', error=f'{type(exc).__name__}: {exc}')
             report['blocked'] += 1
@@ -396,6 +397,9 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
         item['status'] = 'ready'
         report['records'].append(item)
     # 首先持久化所有 before/after，再逐局原子执行；中断仍保留完整校正计划。
+    journal = path.with_suffix('.jsonl') if apply else None
+    if journal is not None:
+        report['journal_file'] = str(journal)
     _archive(path, report)
     if apply:
         for item in report['records']:
@@ -426,7 +430,10 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
                 report['applied'] += 1
             else:
                 report['failed'] += 1
-            _archive(path, report)
+            # 大批量修复只追加本局执行结果；完整 before/after 已在首次审计文件中持久化。
+            with journal.open('a', encoding='utf-8') as output:
+                output.write(json.dumps({'result_id': item['result_id'], 'status': outcome.status,
+                                         'error': outcome.error}, ensure_ascii=False) + '\n')
     report['finished_at'] = utc_now().isoformat() + 'Z'
     report['report_file'] = str(path)
     _archive(path, report)

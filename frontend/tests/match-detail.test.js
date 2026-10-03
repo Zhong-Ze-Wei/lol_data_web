@@ -21,7 +21,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function showMatch({ count, verified, duration }) {
+async function showMatch({ count, verified, duration, metrics = {} }) {
   const players = Array.from({ length: count }, (_, index) => ({
     name: `已收录选手${index + 1}`,
     team_name: index < 5 ? "蓝队" : "红队",
@@ -36,6 +36,7 @@ async function showMatch({ count, verified, duration }) {
     atk_m: duration ? 400 : null,
     hits: 180,
     money: 9000,
+    ...metrics,
   }));
   vi.stubGlobal(
     "fetch",
@@ -112,5 +113,36 @@ describe("比赛详情数据质量", () => {
       "已收录 10/10 位选手",
     );
     expect(document.querySelector(".match-quality-notice")).toBeNull();
+  });
+  it("整组统计缺失显示空值并说明原因，不绘制零伤害图", async () => {
+    await showMatch({
+      count: 10,
+      verified: true,
+      duration: 1800,
+      metrics: { atk: null, atk_m: null, money: null, hits: null },
+    });
+    expect(
+      document.querySelector(".match-quality-notice").textContent,
+    ).toContain("部分伤害、经济、补刀数据缺失，空值未计为零");
+    expect(document.querySelector('[role="img"]')).toBeNull();
+    expect(document.body.textContent).toContain(
+      "本场没有可信伤害记录，未生成伤害图",
+    );
+    for (const row of document.querySelectorAll("tbody tr"))
+      for (const cell of Array.from(row.querySelectorAll("td")).slice(6))
+        expect(cell.textContent).toBe("—");
+  });
+  it("可信零值仍显示0，伤害图保留", async () => {
+    await showMatch({
+      count: 10,
+      verified: true,
+      duration: 1800,
+      metrics: { atk: 0, atk_m: 0, money: 0, hits: 0 },
+    });
+    expect(document.querySelector(".match-quality-notice")).toBeNull();
+    expect(document.querySelector('[role="img"]')).not.toBeNull();
+    for (const row of document.querySelectorAll("tbody tr"))
+      for (const cell of Array.from(row.querySelectorAll("td")).slice(6))
+        expect(cell.textContent).toBe("0");
   });
 });

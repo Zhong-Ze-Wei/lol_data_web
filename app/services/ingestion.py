@@ -93,6 +93,80 @@ def _source_duration(info, allow_incomplete, missing):
     return duration
 
 
+def _known_nonzero_kills(info, teams):
+    """整族占位判断需要十人击杀与双方战队汇总互相印证。"""
+    for side, team in zip(('red', 'blue'), teams):
+        try:
+            kills = [numeric(info.get(f'{side}_star_{position}_kills'),
+                             f'{side}_star_{position}_kills', integer=True) for position in 'abcde']
+        except InvalidResult:
+            return False  # 未具名槽仍可提供原件证据；无效击杀不作为清空其他指标的依据。
+        if any(value is None for value in kills):
+            return False
+        if team['kill'] is None or team['kill'] != sum(kills):
+            return False
+    return sum(team['kill'] for team in teams) > 0
+
+
+def _source_fields_all_zero(info, fields):
+    """缺名槽也须有有效原件零值，坏原件只取消本族判断，不拒绝其余具名行。"""
+    try:
+        return all(numeric(info.get(field), field) == 0 for field in fields)
+    except InvalidResult:
+        return False
+
+
+def _clear_missing_metric_groups(info, teams, players):
+    """只有跨十人和双方的整族明确零，才视为未记录；局部真实零保留。"""
+    if not _known_nonzero_kills(info, teams):
+        return []
+    slots = [(side, position) for side in ('red', 'blue') for position in 'abcde']
+    damage_keys = [f'{side}_star_{position}_{field}' for side, position in slots
+                   for field in ('atk_o', 'def_o')] + ['red_attack', 'blue_attack']
+    economy_keys = [f'{side}_star_{position}_money_o' for side, position in slots] + ['red_money', 'blue_money']
+    cs_keys = economy_keys + [f'{side}_star_{position}_hits' for side, position in slots]
+    combat_keys = [f'{side}_{field}' for side in ('red', 'blue') for field in ('result', 'kill')]
+    combat_keys += [f'{side}_star_{position}_kills' for side, position in slots]
+    rules = (
+        ('damage', damage_keys,
+         {'atk': 'atk_o', 'atk_p': 'atk_p', 'atk_m': 'atk_m', 'def_': 'def_o', 'def_p': 'def_p', 'def_m': 'def_m'},
+         {'attack': 'attack'}, '十人伤害/承伤及双方伤害整组来源零与可靠战果矛盾，已排除该族'),
+        ('economy', economy_keys, {'money': 'money_o', 'money_M': 'money_M'}, {'money': 'money'},
+         '十人及双方经济整组来源零与可靠战果矛盾，已排除该族'),
+        ('cs', cs_keys, {'hits': 'hits', 'adc_m': 'adc_m'}, {},
+         '经济族已排除且十人补刀整组来源零；疑似未记录，已排除补刀族'),
+    )
+    players_by_slot = {(player['team_name'], player['position']): player for player in players}
+    invalid_groups = []
+    for group, source_keys, player_fields, team_fields, reason in rules:
+        # None、缺键和空字符串不等于明确零；不能凭不完整的整族资料扩大判断。
+        if not _source_fields_all_zero(info, source_keys):
+            continue
+        cleared_fields = []
+        for side, team in zip(('red', 'blue'), teams):
+            for field, source in team_fields.items():
+                source_field = f'{side}_{source}'
+                if team[field] == 0:
+                    team[field] = None
+                    cleared_fields.append({'table': 'teams', 'team_name': team['team_name'], 'field': field,
+                                           'source_field': source_field, 'source_value': info[source_field]})
+            for position in 'abcde':
+                player = players_by_slot.get((team['team_name'], position))
+                if player is None:
+                    continue  # 原始十槽统计证据不制造缺失身份，只清现有具名行。
+                for field, source in player_fields.items():
+                    source_field = f'{side}_star_{position}_{source}'
+                    if player[field] == 0 and numeric(info.get(source_field), source_field) == 0:
+                        player[field] = None
+                        cleared_fields.append({'table': 'players', 'team_name': player['team_name'],
+                                               'position': position, 'field': field, 'source_field': source_field,
+                                               'source_value': info[source_field]})
+        invalid_groups.append({'group': group, 'reason': reason,
+                               'evidence': {key: info[key] for key in source_keys + combat_keys},
+                               'cleared_fields': cleared_fields})
+    return invalid_groups
+
+
 def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, names_by_source_id=None):
     if not isinstance(payload, dict):
         raise InvalidResult('详情返回值必须为 JSON 对象')
@@ -224,6 +298,8 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
                     missing.append(key)
             players.append(player)
         teams.append(team)
+    invalid_metric_groups = _clear_missing_metric_groups(info, teams, players)
+    missing.extend(group['reason'] for group in invalid_metric_groups)
     normalized = {'matches': [match], 'teams': teams, 'players': players}
     if missing:
         normalized['source_incomplete'] = missing
@@ -233,6 +309,8 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
         normalized['missing_roster_slots'] = missing_roster_slots
     if recovered_player_names:
         normalized['recovered_player_names'] = recovered_player_names
+    if invalid_metric_groups:
+        normalized['invalid_metric_groups'] = invalid_metric_groups
     if duration is None:
         normalized['invalid_duration'] = True
     return normalized
@@ -370,6 +448,18 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
             db.session.query(Player).filter_by(match_id=result_id, team_name=invalid['team_name'],
                                               position=invalid['position']).update(
                 {invalid['field']: None}, synchronize_session=False)
+        # 已证实的整族占位零覆盖 COALESCE；按自然键合并字段，仍在本局事务中清 NULL。
+        forced_clears = {}
+        for group in data.get('invalid_metric_groups', []):
+            for cleared in group['cleared_fields']:
+                key = (cleared['table'], cleared['team_name'], cleared.get('position'))
+                forced_clears.setdefault(key, {})[cleared['field']] = None
+        for (table, team_name, position), values in forced_clears.items():
+            model = Player if table == 'players' else Team
+            query = db.session.query(model).filter_by(match_id=result_id, team_name=team_name)
+            if table == 'players':
+                query = query.filter_by(position=position)
+            query.update(values, synchronize_session=False)
         # 线上完整结果替换历史残缺/冲突多出来的自然键，现有正确记录仍原位更新。
         team_names = [team['team_name'] for team in data['teams']]
         db.session.query(Player).filter(Player.match_id == result_id, or_(
