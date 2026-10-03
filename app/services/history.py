@@ -15,7 +15,9 @@ from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
 from app.models.sync import HistoryTournament, HistoryStage, HistorySeries, SyncTask, utc_now
-from app.services.ingestion import get_task, ingest_result, mark_failure, normalize_result, start_task
+from app.services.ingestion import (
+    get_task, has_finished_lol_evidence, ingest_result, mark_failure, normalize_result, start_task,
+)
 from app.services.spider import (
     BudgetExceeded, SourceError, SourceHTTPError, history_schedule, parse_tournament_page,
     result_ids_from_list, tournament_catalog, tournament_stages,
@@ -276,15 +278,22 @@ def _fetch_task(client, task, raw_dir, run_id, now):
     series = db.session.get(HistorySeries, task.series_id) if task.series_id else None
     if series is not None:
         schedule = series.schedule()
-    allow_incomplete = (series is not None and series.source_status == '2'
-                        and (series.scheduled_at is None or series.scheduled_at < now - timedelta(days=14)))
+    series_allows_incomplete = (series is not None and series.source_status == '2'
+                               and (series.scheduled_at is None or series.scheduled_at < now - timedelta(days=14)))
+    # 旧 CSV 只提供已知单局 ID；是否 LOL、是否结束必须由详情本身确认。
+    legacy_candidate = (series is None
+                        and (task.scheduled_at is None or task.scheduled_at < now - timedelta(days=14))
+                        and db.session.query(Match).filter_by(
+                            match_id=task.result_id, source='legacy', verified=False).first() is not None)
     path = raw_dir / 'scoregg' / f'{task.result_id}.json'
     payload, reused = None, False
     # 已有原始详情可以重新核验并回填真实赛程；没有合法原始证据就必须请求。
     if path.is_file():
         try:
             cached = json.loads(path.read_text(encoding='utf-8'))
-            normalize_result(cached, task.result_id, schedule, allow_incomplete=allow_incomplete)
+            cached_allows_incomplete = series_allows_incomplete or (
+                legacy_candidate and has_finished_lol_evidence(cached, task.result_id))
+            normalize_result(cached, task.result_id, schedule, allow_incomplete=cached_allows_incomplete)
             payload, reused = cached, True
         except (OSError, ValueError, TypeError):
             payload = None
@@ -292,6 +301,7 @@ def _fetch_task(client, task, raw_dir, run_id, now):
     if payload is None:
         payload = client.get_result(task.result_id)
         _archive(path, payload)
+    allow_incomplete = series_allows_incomplete or (legacy_candidate and has_finished_lol_evidence(payload, task.result_id))
     outcome = ingest_result(payload, task.result_id, schedule, run_id, allow_incomplete=allow_incomplete)
     return {**outcome.to_dict(), 'reused_raw': reused, 'raw_file': str(path)}
 
