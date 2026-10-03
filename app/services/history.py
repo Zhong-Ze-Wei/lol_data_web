@@ -195,7 +195,7 @@ def _discover_stage(client, stage, raw_dir, now):
 
 
 def _structure_complete(match):
-    if match is None or not match.verified or not match.game_time:
+    if match is None or not match.verified or match.game_time is None or match.game_time <= 1:
         return False
     players = db.session.query(func.count(Player.id)).filter_by(match_id=match.match_id).scalar()
     teams = db.session.query(func.count(Team.id)).filter_by(match_id=match.match_id).scalar()
@@ -296,19 +296,21 @@ def _fetch_task(client, task, raw_dir, run_id, now):
     return {**outcome.to_dict(), 'reused_raw': reused, 'raw_file': str(path)}
 
 
-def _raw_repair_schedule(match):
+def _raw_repair_schedule(match=None, result_id=None):
     """保留来自已发现赛程的元数据；updated_at 不能冒充真实比赛日。"""
-    task = db.session.query(SyncTask).filter_by(result_id=match.match_id).first()
-    series_id = task.series_id if task is not None and task.series_id else match.series_id
+    result_id = match.match_id if match is not None else result_id
+    task = db.session.query(SyncTask).filter_by(result_id=result_id).first()
+    series_id = task.series_id if task is not None and task.series_id else (match.series_id if match is not None else None)
     series = db.session.get(HistorySeries, series_id) if series_id else None
     if series is not None:
         return series.schedule()
     schedule = task.schedule() if task is not None else {}
-    for field in ('series_id', 'tournament_id', 'tournament_name'):
-        if schedule.get(field) is None and getattr(match, field) is not None:
-            schedule[field] = getattr(match, field)
-    if schedule.get('scheduled_at') is None and match.date_source == 'schedule':
-        schedule['scheduled_at'] = match.date
+    if match is not None:
+        for field in ('series_id', 'tournament_id', 'tournament_name'):
+            if schedule.get(field) is None and getattr(match, field) is not None:
+                schedule[field] = getattr(match, field)
+        if schedule.get('scheduled_at') is None and match.date_source == 'schedule':
+            schedule['scheduled_at'] = match.date
     return schedule
 
 
@@ -337,29 +339,51 @@ def _raw_repair_changes(normalized, result_id):
     return changes
 
 
-def repair_verified_raw(raw_dir, reports_dir, *, apply=False):
+def repair_verified_raw(raw_dir, reports_dir, *, apply=False, names_by_source_id=None):
     """零 HTTP 审计/重放已提升的行。调用方必须先备份并持有同一 PipelineLock。"""
+    result_ids = [rid for (rid,) in db.session.query(Match.match_id).filter_by(
+        source='scoregg', verified=True).order_by(Match.match_id)]
+    return repair_archived_results(raw_dir, reports_dir, result_ids=result_ids, apply=apply,
+                                   names_by_source_id=names_by_source_id)
+
+
+def _check_recovery_references(recovered_names):
+    for recovered in recovered_names:
+        for reference in recovered['references']:
+            encoded = Path(reference['raw_file']).read_bytes()
+            if hashlib.sha256(encoded).hexdigest() != reference['raw_sha256']:
+                raise ValueError('恢复昵称的原始依据 SHA 已改变')
+
+
+def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, names_by_source_id=None):
+    """显式指定归档单局，先写 before/after 与身份依据，再原子重放；零 HTTP。"""
     raw_dir, reports_dir = Path(raw_dir), Path(reports_dir)
     report_id = str(uuid4())
     report = {'repair_id': report_id, 'mode': 'apply' if apply else 'audit',
               'started_at': utc_now().isoformat() + 'Z', 'request_count': 0,
-              'rule': '以公开 raw 重建指标 NULL；保留可信赛程 metadata，原 CSV/raw 不修改',
+              'rule': '以公开 raw 重建指标 NULL 与部分名单；昵称仅取唯一同源 ID 依据；原 CSV/raw 不修改',
               'checked': 0, 'changed_records': 0, 'changed_fields': 0,
               'cleared_unsupported_fields': 0, 'applied': 0, 'blocked': 0, 'failed': 0, 'records': []}
     path = reports_dir / f'verified-raw-repair-{report_id}.json'
-    matches = db.session.query(Match).filter_by(source='scoregg', verified=True).order_by(Match.match_id).all()
-    for match in matches:
-        raw = raw_dir / 'scoregg' / f'{match.match_id}.json'
-        item = {'result_id': match.match_id, 'raw_file': str(raw)}
+    for result_id in sorted({int(value) for value in result_ids}):
+        match = db.session.query(Match).filter_by(match_id=result_id).first()
+        raw = raw_dir / 'scoregg' / f'{result_id}.json'
+        item = {'result_id': result_id, 'raw_file': str(raw)}
+        expected_state = (match.source, match.verified) if match is not None else None
+        item['previous_source_state'] = expected_state
         report['checked'] += 1
         try:
             encoded = raw.read_bytes()
             payload = json.loads(encoded)
-            schedule = _raw_repair_schedule(match)
-            normalized = normalize_result(payload, match.match_id, schedule, allow_incomplete=True)
+            schedule = _raw_repair_schedule(match, result_id)
+            normalized = normalize_result(payload, result_id, schedule, allow_incomplete=True,
+                                          names_by_source_id=names_by_source_id)
+            _check_recovery_references(normalized.get('recovered_player_names', []))
             item['sha256'] = hashlib.sha256(encoded).hexdigest()
-            item['changes'] = _raw_repair_changes(normalized, match.match_id)
+            item['changes'] = _raw_repair_changes(normalized, result_id)
             item['source_incomplete'] = normalized.get('source_incomplete', [])
+            item['missing_roster_slots'] = normalized.get('missing_roster_slots', [])
+            item['recovered_player_names'] = normalized.get('recovered_player_names', [])
         except (OSError, ValueError, TypeError) as exc:
             item.update(status='blocked', error=f'{type(exc).__name__}: {exc}')
             report['blocked'] += 1
@@ -383,13 +407,20 @@ def repair_verified_raw(raw_dir, reports_dir, *, apply=False):
                 item.update(status='blocked', error='审计后 raw hash 改变，未重放此局')
                 report['blocked'] += 1
                 continue
-            match = db.session.query(Match).filter_by(match_id=item['result_id'], source='scoregg', verified=True).first()
-            if match is None:
+            match = db.session.query(Match).filter_by(match_id=item['result_id']).first()
+            current_state = (match.source, match.verified) if match is not None else None
+            if current_state != item['previous_source_state']:
                 item.update(status='blocked', error='审计后来源/核验状态改变，未重放此局')
                 report['blocked'] += 1
                 continue
-            outcome = ingest_result(json.loads(encoded), item['result_id'], _raw_repair_schedule(match),
-                                    allow_incomplete=True, replace_existing=True)
+            try:
+                _check_recovery_references(item['recovered_player_names'])
+            except (OSError, ValueError) as exc:
+                item.update(status='blocked', error=str(exc))
+                report['blocked'] += 1
+                continue
+            outcome = ingest_result(json.loads(encoded), item['result_id'], _raw_repair_schedule(match, item['result_id']),
+                                    allow_incomplete=True, replace_existing=True, names_by_source_id=names_by_source_id)
             item.update(status=outcome.status, error=outcome.error)
             if outcome.status in ('imported', 'source_incomplete'):
                 report['applied'] += 1
@@ -485,7 +516,7 @@ def coverage_report(max_attempts=5):
         if verified:
             results['verified'] += 1
             years[key]['verified_results'] += 1
-        if verified and duration and players == 10 and teams == 2 and status == 'imported':
+        if verified and duration is not None and duration > 1 and players == 10 and teams == 2 and status == 'imported':
             results['complete'] += 1
             years[key]['complete_results'] += 1
         if status == 'source_incomplete':

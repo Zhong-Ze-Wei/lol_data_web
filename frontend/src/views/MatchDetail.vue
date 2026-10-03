@@ -24,6 +24,22 @@ const resource = useResource(
   [() => route.params.match_id],
 );
 const match = computed(() => resource.data.value?.match);
+const players = computed(() => resource.data.value?.players || []);
+const qualityNotice = computed(() => {
+  if (!match.value) return "";
+  const notes = [];
+  if (players.value.length < 10) {
+    notes.push(
+      match.value.verified
+        ? "公开战报阵容有缺项，个人统计仅包含已确认选手"
+        : "历史记录阵容不完整，个人统计仅包含已收录选手",
+    );
+  }
+  if (match.value.game_time == null || match.value.game_time <= 0) {
+    notes.push("缺少可信比赛时长，分均指标未计算");
+  }
+  return notes.length ? `${notes.join("；")}。` : "";
+});
 const sides = computed(() =>
   resource.data.value
     ? [
@@ -91,7 +107,10 @@ const damage = computed(() => {
   <header class="page-heading">
     <div>
       <h1>比赛详情</h1>
-      <p>比赛 #{{ route.params.match_id }}</p>
+      <p>
+        比赛 #{{ route.params.match_id
+        }}<span v-if="match"> · 已收录 {{ players.length }}/10 位选手</span>
+      </p>
     </div>
     <MatchStatus v-if="match" :verified="match.verified" />
   </header>
@@ -100,7 +119,10 @@ const damage = computed(() => {
     :error="resource.error.value"
     @retry="resource.reload"
     ><template v-if="match"
-      ><section class="match-scoreboard">
+      ><p v-if="qualityNotice" class="match-quality-notice" role="status">
+        {{ qualityNotice }}
+      </p>
+      <section class="match-scoreboard">
         <div class="score-team blue">
           <span class="eyebrow">蓝方</span
           ><RouterLink :to="detailLink('team', match.blue_team_name)">{{
@@ -225,7 +247,7 @@ const damage = computed(() => {
         </header>
         <Chart
           :option="damage"
-          label="本场十位选手对英雄总伤害条形图"
+          label="本场已收录选手对英雄总伤害条形图"
           :height="380"
         />
         <p class="chart-note">
@@ -235,3 +257,15 @@ const damage = computed(() => {
     </template></ResourceState
   >
 </template>
+<style scoped>
+.match-quality-notice {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #ffe3ba;
+  border-radius: 5px;
+  background: #fff9ef;
+  color: #865a1d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+</style>
