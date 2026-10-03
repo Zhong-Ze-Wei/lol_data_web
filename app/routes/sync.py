@@ -54,6 +54,7 @@ def sync_status():
         schedule.update(json.loads(schedule_file.read_text(encoding="utf-8-sig")))
     return jsonify(
         last_run=last_run.to_dict() if last_run else None,
+        history_worker=worker_status(Path(current_app.config["DATA_DIR"]) / "history-worker.json"),
         tasks=tasks,
         schedule=schedule,
         data_range={"min_date": first.isoformat() if first else None, "max_date": last.isoformat() if last else None},
