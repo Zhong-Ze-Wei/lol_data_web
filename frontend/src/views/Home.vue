@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onScopeDispose, ref } from "vue";
-import { request } from "../services/api.js";
+import { request, streamAIQuery } from "../services/api.js";
 import { useResource } from "../composables/useResource.js";
 import {
   number,
@@ -52,31 +52,64 @@ const context = ref(null);
 const resultElement = ref(null);
 const examples = ["参赛最多的五位选手是谁？", "比较 T1 和 GEN 的胜率。"];
 let aiController;
-onScopeDispose(() => aiController?.abort());
+let aiGeneration = 0;
+onScopeDispose(() => {
+  aiGeneration += 1;
+  aiController?.abort();
+});
 async function ask() {
   if (!prompt.value.trim() || aiLoading.value) return;
+  const generation = ++aiGeneration;
+  aiController?.abort();
   aiLoading.value = true;
   aiError.value = "";
   result.value = null;
   aiController = new AbortController();
   try {
-    const data = await request("/api/ai/query", {
-      method: "POST",
+    await streamAIQuery({
       body: queryBody(prompt.value, context.value),
       signal: aiController.signal,
+      onResult(incoming, type) {
+        if (generation !== aiGeneration) return;
+        if (incoming.error) throw new Error(incoming.error);
+        if (type === "data") {
+          result.value = incoming;
+          context.value = incoming.context || null;
+          aiLoading.value = false;
+          nextTick(() => {
+            if (generation === aiGeneration)
+              resultElement.value?.scrollIntoView({ block: "start" });
+          });
+        } else {
+          const update = {
+            answer: incoming.answer,
+            assumptions: incoming.assumptions,
+            explanation_status: incoming.explanation_status,
+          };
+          if (incoming.evidence) {
+            update.evidence = { ...result.value.evidence };
+            for (const key of ["model_calls", "timings_ms"])
+              if (key in incoming.evidence)
+                update.evidence[key] = incoming.evidence[key];
+          }
+          result.value = { ...result.value, ...update };
+        }
+      },
     });
-    if (data.result?.error) throw new Error(data.result.error);
-    result.value = data.result;
-    context.value = data.result.context || null;
-    await nextTick();
-    resultElement.value?.scrollIntoView({ block: "start" });
   } catch (error) {
-    if (error.name !== "AbortError") aiError.value = error.message;
+    if (generation === aiGeneration && error.name !== "AbortError") {
+      if (result.value)
+        result.value = { ...result.value, explanation_status: "unavailable" };
+      else aiError.value = error.message;
+    }
   } finally {
-    aiLoading.value = false;
+    if (generation === aiGeneration) aiLoading.value = false;
   }
 }
 function clear() {
+  aiGeneration += 1;
+  aiController?.abort();
+  aiLoading.value = false;
   prompt.value = "";
   result.value = null;
   context.value = null;
@@ -216,12 +249,7 @@ function rowLink(row) {
           <div class="query-actions">
             <span class="muted small-text">Ctrl + Enter 发送</span>
             <div>
-              <button
-                class="text-button"
-                type="button"
-                :disabled="aiLoading"
-                @click="clear"
-              >
+              <button class="text-button" type="button" @click="clear">
                 {{ context?.plan ? "新问题" : "清空" }}</button
               ><button
                 class="button small"
@@ -243,7 +271,7 @@ function rowLink(row) {
           </button>
         </div>
         <div v-if="aiLoading" class="state-box" role="status">
-          <span class="spinner"></span>正在查询并整理回答…
+          <span class="spinner"></span>正在查询数据…
         </div>
         <div v-if="aiError" class="ai-error" role="alert">{{ aiError }}</div>
         <a
