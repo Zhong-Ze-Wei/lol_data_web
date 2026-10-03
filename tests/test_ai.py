@@ -34,6 +34,12 @@ def completion(content, finish_reason="stop"):
     }))
 
 
+def query_plan(**overrides):
+    return {"type": "query", "subject": "match", "dimensions": [], "metrics": ["games"],
+            "filters": {}, "min_games": 1, "order_by": "games", "direction": "desc",
+            "limit": 100, "per_group_top_n": None, **overrides}
+
+
 @pytest.mark.parametrize("sql", [
     "DELETE FROM players", "SELECT 1; DROP TABLE matches",
     "SELECT * FROM sqlite_master", "SELECT * FROM other.players",
@@ -159,7 +165,7 @@ def test_ai_rejects_empty_or_non_text_content(client, ai_config, provider_post, 
 def test_ai_never_executes_a_truncated_sql_response(client, ai_config, provider_post, monkeypatch):
     provider_post.return_value = completion("SELECT COUNT(*) FROM matches", finish_reason="length")
     execute = Mock()
-    monkeypatch.setattr(ai_assistant, "execute_readonly", execute)
+    monkeypatch.setattr(ai_assistant, "execute_readonly_batch", execute)
     response = client.post("/api/ai/query", json={"prompt": "比赛数量"})
     assert response.status_code == 503
     assert "长度限制" in response.json["error"]
@@ -174,23 +180,25 @@ def test_ai_queries_database_then_answers_using_returned_rows(client, ai_config,
     ])
     db.session.commit()
     provider_post.side_effect = [
-        completion("SELECT COUNT(*) AS total FROM matches WHERE verified = 1"),
+        completion(json.dumps(query_plan(filters={"verified_only": True}))),
         completion("当前收录并已核验的比赛共 **1 局**。"),
     ]
     response = client.post("/api/ai/query", json={"prompt": "已经核验了多少局比赛？"})
     assert response.status_code == 200
-    assert response.json["result"]["data"] == [{"total": 1}]
+    assert response.json["result"]["data"][0]["games"] == 1
     assert response.json["result"]["answer"] == "当前收录并已核验的比赛共 **1 局**。"
-    assert response.json["result"]["sql"].endswith("LIMIT 100")
+    assert "LIMIT 100" in response.json["result"]["sql"]
     assert provider_post.call_count == 2
     answer_prompt = json.loads(provider_post.call_args_list[1].kwargs["json"]["messages"][1]["content"])
-    assert answer_prompt == {"question": "已经核验了多少局比赛？", "rows": [{"total": 1}]}
+    assert answer_prompt["question"] == "已经核验了多少局比赛？"
+    assert answer_prompt["rows"] == response.json["result"]["data"]
+    assert answer_prompt["evidence"]["verified_matches"] == 1
 
 
 def test_ai_empty_query_results_do_not_make_another_provider_call(client, ai_config, provider_post):
-    provider_post.return_value = completion("SELECT match_id FROM matches WHERE match_id = -1")
+    provider_post.return_value = completion(json.dumps(query_plan(dimensions=["tournament"], filters={"tournament_contains": ["not-in-data"]})))
     response = client.post("/api/ai/query", json={"prompt": "查找不存在的比赛"})
     assert response.status_code == 200
     assert response.json["result"]["data"] == []
-    assert "没有找到" in response.json["result"]["answer"]
+    assert "没有符合" in response.json["result"]["answer"]
     assert provider_post.call_count == 1
