@@ -373,7 +373,8 @@ def run_ai_query(user_prompt, user_name="", request_id=None, context=None):
                 "胜率使用已知胜负分母；KDA严格使用提供的口径；小样本注明局限。",
                 json.dumps({"question": user_prompt, "rows": data, "columns": columns, "evidence": evidence, "assumptions": assumptions}, ensure_ascii=False, default=str),
             )
-        except AIUnavailable:
+        except AIUnavailable as error:
+            logger.warning("AI explanation unavailable: %s", error)
             assumptions.append("AI 文字解读暂时不可用；已完成的查询结果与统计口径仍可核对。")
         model_calls += 1
     evidence["model_calls"] = model_calls
