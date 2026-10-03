@@ -3,48 +3,60 @@ import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { request } from "../services/api.js";
 import { useResource } from "../composables/useResource.js";
 import { number, timestamp } from "../utils/format.js";
-import { historyLabel, stateCount } from "../utils/history.js";
+import {
+  historyLabel,
+  historyWorkerAlive,
+  stateCount,
+} from "../utils/history.js";
 import Icon from "./Icon.vue";
 
-const { data, loading, error, reload } = useResource((signal) =>
-  request("/api/sync/history", { signal }),
-);
+const { data, loading, error, reload } = useResource(async (signal) => {
+  const requestedAt = performance.now();
+  const result = await request("/api/sync/history", { signal });
+  return { result, requestedAt, receivedAt: performance.now() };
+});
 const latest = shallowRef(null);
-const receivedAt = ref(performance.now());
-const clock = ref(receivedAt.value);
+const stateRequestedAt = ref(performance.now());
+const clock = ref(stateRequestedAt.value);
+const statusUnavailable = ref(false);
+watch(error, (value) => {
+  if (value) statusUnavailable.value = true;
+});
 watch(data, (value) => {
   if (value) {
-    latest.value = value;
-    receivedAt.value = performance.now();
-    clock.value = receivedAt.value;
+    latest.value = value.result;
+    // 整次请求耗时计入心跳年龄；挂起的新请求不改变上一成功响应的锚点。
+    stateRequestedAt.value = value.requestedAt;
+    clock.value = value.receivedAt;
+    statusUnavailable.value = false;
   }
 });
 const progress = computed(() => {
-  const value = data.value || latest.value;
+  const value = data.value?.result || latest.value;
   if (!value?.worker) return value;
   const worker = value.worker;
-  const age =
-    worker.heartbeat_age_seconds + (clock.value - receivedAt.value) / 1000;
+  const elapsedSeconds = (clock.value - stateRequestedAt.value) / 1000;
   return {
     ...value,
     worker: {
       ...worker,
       alive:
-        worker.alive === true &&
-        age >= 0 &&
-        age <= worker.heartbeat_timeout_seconds,
+        !statusUnavailable.value && historyWorkerAlive(worker, elapsedSeconds),
     },
   };
 });
 const clockTimer = setInterval(() => {
   clock.value = performance.now();
 }, 15000);
-const refreshTimer = setInterval(reload, 30000);
+const refreshTimer = setInterval(() => {
+  if (!loading.value) reload();
+}, 30000);
 onScopeDispose(() => {
   clearInterval(clockTimer);
   clearInterval(refreshTimer);
 });
 const runtimeLabel = computed(() => {
+  if (statusUnavailable.value) return "后台运行状态暂不可用";
   const worker = progress.value?.worker;
   if (!worker) return "后台尚未报告运行状态";
   if (worker.alive) return "后台最近心跳正常";
@@ -115,9 +127,9 @@ const fields = [
       <span
         class="history-state"
         :class="{
-          active: !error && progress?.worker?.alive === true,
+          active: !statusUnavailable && progress?.worker?.alive === true,
         }"
-        >{{ error ? "历史补采进度暂不可用" : status }}</span
+        >{{ statusUnavailable ? "历史补采进度暂不可用" : status }}</span
       >
       <button
         class="text-button small-text"
@@ -127,7 +139,7 @@ const fields = [
         <Icon name="refresh" />刷新
       </button>
     </header>
-    <template v-if="progress && !error">
+    <template v-if="progress">
       <dl class="history-metrics">
         <div v-for="metric in metrics" :key="metric.label">
           <dt>{{ metric.label }}</dt>
