@@ -149,13 +149,13 @@ const teamChart = computed(() => {
     xAxis: {
       type: "category",
       data: rows.map((row) => row.team_name),
-      axisLabel: { color: "#a8bacb" },
-      axisLine: { lineStyle: { color: "#293b4b" } },
+      axisLabel: { color: "#4e5969" },
+      axisLine: { lineStyle: { color: "#d4d9e1" } },
     },
     yAxis: {
       type: "value",
-      axisLabel: { color: "#a8bacb" },
-      splitLine: { lineStyle: { color: "#203142" } },
+      axisLabel: { color: "#4e5969" },
+      splitLine: { lineStyle: { color: "#edf0f4" } },
     },
     series: [
       {
@@ -172,8 +172,7 @@ const teamChart = computed(() => {
 </script>
 <template>
   <header class="page-heading">
-    <p class="eyebrow">ANALYSIS / CONTEXT MATTERS</p>
-    <h1>比较分析<span class="heading-rule"></span></h1>
+    <h1>比较分析</h1>
     <p>先统一位置、日期和样本门槛，再阅读表现差异。</p>
   </header>
   <div class="analysis-tabs" aria-label="分析类型">
@@ -220,7 +219,7 @@ const teamChart = computed(() => {
           :min="filters.date_from"
       /></label>
       <div class="filter-buttons">
-        <button class="button small">应用条件 ↗</button>
+        <button class="button small">应用筛选</button>
       </div>
     </form>
     <p class="filter-note">
@@ -237,7 +236,6 @@ const teamChart = computed(() => {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">POSITION RADAR / PERCENTILE</p>
               <h2>赛场风格轮廓</h2>
             </div>
             <span class="tag"
@@ -264,7 +262,6 @@ const teamChart = computed(() => {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">YOUR COMPARISON</p>
               <h2>本次比较</h2>
             </div>
             <span class="tag">{{ selected.length }} / 4</span>
@@ -329,7 +326,6 @@ const teamChart = computed(() => {
       <section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">SELECT YOUR PLAYERS</p>
             <h2>同位置样本</h2>
           </div>
           <span class="muted small-text">按出场样本排序</span>
@@ -397,7 +393,6 @@ const teamChart = computed(() => {
       ><section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">TEAM PERFORMANCE</p>
             <h2>战队样本比较</h2>
           </div>
           <span class="tag">{{ teams.data.value.teams.length }} 支战队</span>
@@ -441,7 +436,6 @@ const teamChart = computed(() => {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">AVERAGE KILLS</p>
               <h2>场均击杀</h2>
             </div>
           </header>
@@ -453,7 +447,6 @@ const teamChart = computed(() => {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">HEAD TO HEAD</p>
               <h2>直接交手</h2>
             </div>
           </header>

@@ -13,6 +13,7 @@ import {
 } from "../utils/format.js";
 import ResourceState from "../components/ResourceState.vue";
 import Chart from "../components/Chart.vue";
+import MatchStatus from "../components/MatchStatus.vue";
 
 const route = useRoute();
 const resource = useResource(
@@ -56,14 +57,14 @@ const damage = computed(() => {
     grid: { top: 15, bottom: 25, left: 90, right: 30 },
     xAxis: {
       type: "value",
-      axisLabel: { color: "#9eb0c3" },
-      splitLine: { lineStyle: { color: "#203142" } },
+      axisLabel: { color: "#4e5969" },
+      splitLine: { lineStyle: { color: "#edf0f4" } },
     },
     yAxis: {
       type: "category",
       inverse: true,
       data: players.map((player) => player.name),
-      axisLabel: { color: "#cad5df" },
+      axisLabel: { color: "#1d2129" },
       axisLine: { show: false },
       axisTick: { show: false },
     },
@@ -76,8 +77,8 @@ const damage = computed(() => {
           itemStyle: {
             color:
               player.team_name === match.value.blue_team_name
-                ? "#75a9ff"
-                : "#f190a9",
+                ? "#1677ff"
+                : "#ff7d00",
           },
         })),
       },
@@ -88,8 +89,11 @@ const damage = computed(() => {
 <template>
   <RouterLink class="back-link" to="/match">← 比赛记录</RouterLink>
   <header class="page-heading">
-    <p class="eyebrow">MATCH REPORT / #{{ route.params.match_id }}</p>
-    <h1>比赛复盘</h1>
+    <div>
+      <h1>比赛详情</h1>
+      <p>比赛 #{{ route.params.match_id }}</p>
+    </div>
+    <MatchStatus v-if="match" :verified="match.verified" />
   </header>
   <ResourceState
     :loading="resource.loading.value"
@@ -98,14 +102,14 @@ const damage = computed(() => {
     ><template v-if="match"
       ><section class="match-scoreboard">
         <div class="score-team blue">
-          <span class="eyebrow">BLUE SIDE / 蓝方</span
+          <span class="eyebrow">蓝方</span
           ><RouterLink :to="detailLink('team', match.blue_team_name)">{{
             match.blue_team_name
           }}</RouterLink
           ><span
             v-if="match.win_team_name === match.blue_team_name"
             class="tag victory"
-            >VICTORY · 胜利</span
+            >胜利</span
           >
         </div>
         <div class="score-center">
@@ -115,14 +119,14 @@ const damage = computed(() => {
           ><small v-if="match.mvp">MVP / {{ match.mvp }}</small>
         </div>
         <div class="score-team red">
-          <span class="eyebrow">RED SIDE / 红方</span
+          <span class="eyebrow">红方</span
           ><RouterLink :to="detailLink('team', match.red_team_name)">{{
             match.red_team_name
           }}</RouterLink
           ><span
             v-if="match.win_team_name === match.red_team_name"
             class="tag victory"
-            >VICTORY · 胜利</span
+            >胜利</span
           >
         </div>
       </section>
@@ -215,7 +219,6 @@ const damage = computed(() => {
       <section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">DAMAGE DISTRIBUTION</p>
             <h2>对英雄总伤害</h2>
           </div>
           <span class="tag">本场原始值</span>

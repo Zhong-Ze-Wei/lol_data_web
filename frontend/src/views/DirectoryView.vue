@@ -14,6 +14,8 @@ import {
 } from "../utils/format.js";
 import ResourceState from "../components/ResourceState.vue";
 import Pagination from "../components/Pagination.vue";
+import Icon from "../components/Icon.vue";
+import MatchStatus from "../components/MatchStatus.vue";
 
 const props = defineProps({ kind: { type: String, required: true } });
 const route = useRoute();
@@ -21,7 +23,6 @@ const router = useRouter();
 const directories = {
   player: {
     title: "选手档案",
-    english: "PLAYER ARCHIVE",
     description: "从每次出场，追踪选手的赛场表现。",
     endpoint: "/player/api/list",
     collection: "players",
@@ -33,7 +34,6 @@ const directories = {
   },
   match: {
     title: "比赛记录",
-    english: "MATCH ARCHIVE",
     description: "沿着队伍与日期，找到一场值得复盘的比赛。",
     endpoint: "/match/api/list",
     collection: "matches",
@@ -46,7 +46,6 @@ const directories = {
   },
   team: {
     title: "战队档案",
-    english: "TEAM ARCHIVE",
     description: "查看已收录战队的出场记录与历史阵容。",
     endpoint: "/team/api/distinct",
     collection: "teams",
@@ -54,7 +53,6 @@ const directories = {
   },
   hero: {
     title: "英雄数据",
-    english: "CHAMPION ARCHIVE",
     description: "从实际选用样本，观察英雄的出场与表现。",
     endpoint: "/hero/api/list",
     collection: "heroes",
@@ -99,8 +97,7 @@ function page(value) {
 </script>
 <template>
   <header class="page-heading">
-    <p class="eyebrow">{{ config.english }} / DATABASE</p>
-    <h1>{{ config.title }}<span class="heading-rule"></span></h1>
+    <h1>{{ config.title }}</h1>
     <p>{{ config.description }}</p>
   </header>
   <section class="panel">
@@ -123,7 +120,7 @@ function page(value) {
           :placeholder="key.includes('date') ? '' : `输入${label}`"
       /></label>
       <div class="filter-buttons">
-        <button class="button small">筛选 ↗</button
+        <button class="button small"><Icon name="search" />查询</button
         ><button class="button secondary small" type="button" @click="reset">
           重置
         </button>
@@ -132,6 +129,28 @@ function page(value) {
     <p v-if="kind === 'match'" class="filter-note">
       日期筛选包含结束月份；历史记录日期来自源数据更新时间。
     </p>
+    <div class="results-header">
+      <div>
+        <strong>查询结果</strong
+        ><span v-if="resource.data.value"
+          >共 {{ number(resource.data.value.pagination.total) }}
+          {{
+            kind === "match"
+              ? "场比赛"
+              : kind === "player"
+                ? "位选手"
+                : kind === "team"
+                  ? "支战队"
+                  : "个英雄"
+          }}</span
+        >
+      </div>
+      <span v-if="kind === 'match'" class="muted">{{
+        route.query.start_date || route.query.end_date
+          ? `${route.query.start_date || "最早记录"} 至 ${route.query.end_date || "最新记录"}`
+          : "全部日期"
+      }}</span>
+    </div>
     <ResourceState
       :loading="resource.loading.value"
       :error="resource.error.value"
@@ -146,7 +165,7 @@ function page(value) {
               <th>位置</th>
               <th class="numeric">出场样本</th>
               <th>最近记录日期</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -174,52 +193,84 @@ function page(value) {
               <td class="muted">{{ date(row.latest_date) }}</td>
               <td>
                 <RouterLink
-                  class="row-arrow"
+                  class="detail-button"
                   :to="detailLink('player', row.name)"
                   :aria-label="`查看 ${row.name}`"
-                  >↗</RouterLink
+                  >查看详情</RouterLink
                 >
               </td>
             </tr>
           </tbody>
         </table>
-        <table v-else-if="kind === 'match'">
+        <table v-else-if="kind === 'match'" class="match-table">
           <thead>
             <tr>
-              <th>记录日期</th>
-              <th>蓝方</th>
-              <th></th>
-              <th>红方</th>
-              <th>获胜队伍</th>
+              <th>日期 / 赛事</th>
+              <th>对阵双方</th>
+              <th>获胜战队</th>
               <th class="numeric">比赛时长</th>
-              <th></th>
+              <th>数据状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in rows" :key="row.match_id">
-              <td class="muted">
-                {{ date(row.date)
-                }}<small class="block mono">#{{ row.match_id }}</small>
+              <td>
+                <span>{{ date(row.date) }}</span
+                ><small v-if="row.tournament_name" class="block muted">{{
+                  row.tournament_name
+                }}</small
+                ><small v-else class="block muted"
+                  >比赛 #{{ row.match_id }}</small
+                >
               </td>
               <td>
-                <RouterLink :to="detailLink('team', row.blue_team_name)">{{
-                  row.blue_team_name
-                }}</RouterLink>
+                <div class="matchup-cell">
+                  <RouterLink
+                    :to="detailLink('team', row.blue_team_name)"
+                    class="team-in-row"
+                    ><span class="team-avatar blue-avatar">{{
+                      row.blue_team_name.slice(0, 2)
+                    }}</span
+                    ><strong>{{ row.blue_team_name }}</strong
+                    ><span
+                      v-if="row.win_team_name === row.blue_team_name"
+                      class="win-label"
+                      >胜</span
+                    ><span v-else-if="row.win_team_name" class="lose-label"
+                      >负</span
+                    ></RouterLink
+                  ><span class="versus">VS</span
+                  ><RouterLink
+                    :to="detailLink('team', row.red_team_name)"
+                    class="team-in-row"
+                    ><span class="team-avatar red-avatar">{{
+                      row.red_team_name.slice(0, 2)
+                    }}</span
+                    ><strong>{{ row.red_team_name }}</strong
+                    ><span
+                      v-if="row.win_team_name === row.red_team_name"
+                      class="win-label"
+                      >胜</span
+                    ><span v-else-if="row.win_team_name" class="lose-label"
+                      >负</span
+                    ></RouterLink
+                  >
+                </div>
               </td>
-              <td class="versus">VS</td>
               <td>
-                <RouterLink :to="detailLink('team', row.red_team_name)">{{
-                  row.red_team_name
-                }}</RouterLink>
+                <span v-if="row.win_team_name" class="winner-name"
+                  ><Icon name="match" />{{ row.win_team_name }}</span
+                ><span v-else class="muted">未记录</span>
               </td>
-              <td class="positive">{{ row.win_team_name || "未记录" }}</td>
               <td class="numeric">{{ duration(row.game_time) }}</td>
+              <td><MatchStatus :verified="row.verified" /></td>
               <td>
                 <RouterLink
-                  class="row-arrow"
+                  class="detail-button"
                   :to="detailLink('match', row.match_id)"
                   :aria-label="`查看比赛 ${row.match_id}`"
-                  >↗</RouterLink
+                  >查看详情</RouterLink
                 >
               </td>
             </tr>
@@ -249,7 +300,7 @@ function page(value) {
                 <RouterLink
                   class="text-link"
                   :to="detailLink('team', row.team_name)"
-                  >战绩与阵容 ↗</RouterLink
+                  >查看战绩与阵容</RouterLink
                 >
               </td>
             </tr>
@@ -262,7 +313,7 @@ function page(value) {
               <th class="numeric">出场样本</th>
               <th class="numeric">胜率</th>
               <th>主要位置</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -281,10 +332,10 @@ function page(value) {
               <td>{{ position(row.position) }}</td>
               <td>
                 <RouterLink
-                  class="row-arrow"
+                  class="detail-button"
                   :to="detailLink('hero', row.hero_name)"
                   :aria-label="`查看 ${row.hero_name}`"
-                  >↗</RouterLink
+                  >查看详情</RouterLink
                 >
               </td>
             </tr>
