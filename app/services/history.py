@@ -515,7 +515,7 @@ def _state_counts(model):
 
 
 def coverage_report(max_attempts=5):
-    """只读覆盖率；年份来自实际赛程，未知日期单列 unknown。"""
+    """只读覆盖率；目录/阶段按赛事开始年，系列/单局按赛程，未知单列。"""
     tournament_states, stage_states, series_states = (_state_counts(m) for m in
                                                      (HistoryTournament, HistoryStage, HistorySeries))
     counts = {'catalog': tournament_states, 'stages': stage_states, 'series': series_states}
@@ -531,12 +531,19 @@ def coverage_report(max_attempts=5):
         key = str(int(year)) if year else 'unknown'
         years[key]['tournaments'] += count
         years[key]['discovered_tournaments'] += count if status == 'discovered' else 0
+        years[key]['failed_tasks'] += count if status == 'failed' else 0
+    for year, count in db.session.query(func.extract('year', HistoryTournament.start_date), func.count()).join(
+            HistoryStage, HistoryStage.tournament_id == HistoryTournament.tournament_id).filter(
+                HistoryStage.status == 'failed').group_by(func.extract('year', HistoryTournament.start_date)):
+        key = str(int(year)) if year else 'unknown'
+        years[key]['failed_tasks'] += count
     for year, status, count in db.session.query(func.extract('year', HistorySeries.scheduled_at),
                                               HistorySeries.status, func.count()).group_by(
                                                   func.extract('year', HistorySeries.scheduled_at), HistorySeries.status):
         key = str(int(year)) if year else 'unknown'
         years[key]['series'] += count
         years[key]['pending_series'] += count if status == 'pending' else 0
+        years[key]['failed_tasks'] += count if status == 'failed' else 0
     player_counts = db.session.query(Player.match_id.label('rid'), func.count().label('n')).group_by(Player.match_id).subquery()
     team_counts = db.session.query(Team.match_id.label('rid'), func.count().label('n')).group_by(Team.match_id).subquery()
     result_rows = db.session.query(SyncTask.result_id, SyncTask.status, HistorySeries.scheduled_at,
@@ -571,6 +578,12 @@ def coverage_report(max_attempts=5):
         HistorySeries, HistorySeries.series_id == SyncTask.series_id).filter(
             SyncTask.result_id.is_not(None), HistorySeries.series_id.is_(None)).group_by(SyncTask.status).all())
     counts['known_unmapped_results'] = unmapped_states
+    for year, count in db.session.query(func.extract('year', SyncTask.scheduled_at), func.count()).outerjoin(
+            HistorySeries, HistorySeries.series_id == SyncTask.series_id).filter(
+                SyncTask.result_id.is_not(None), HistorySeries.series_id.is_(None), SyncTask.status == 'failed').group_by(
+                    func.extract('year', SyncTask.scheduled_at)):
+        key = str(int(year)) if year else 'unknown'
+        years[key]['failed_tasks'] += count
     unseeded_legacy = db.session.query(Match).outerjoin(SyncTask, SyncTask.result_id == Match.match_id).filter(
         Match.source == 'legacy', Match.verified.is_(False), SyncTask.id.is_(None)).count()
     ready = sum(_ready(db.session.query(model), model, max_attempts, include_pending=True).count()
@@ -609,7 +622,8 @@ def coverage_report(max_attempts=5):
         'snapshot_completed': snapshot_completed, 'has_runnable_work': bool(ready),
         'next_retry_at': next_retry.isoformat() + 'Z' if next_retry else None,
         'exhausted_tasks': exhausted,
-        'date_basis': 'series.scheduled_at，排除 updated_at；无实际赛程归 unknown',
+        'date_basis': '目录和阶段按赛事开始年；系列及关联单局按 series.scheduled_at，'
+                      '未关联单局按任务赛程；排除 updated_at，无日期归 unknown',
     }
 
 
