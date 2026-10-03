@@ -45,6 +45,36 @@ async function showProgress(worker, fetch) {
 }
 
 describe("历史后台运行展示", () => {
+  it.each([
+    [
+      { total: 388, discovered: 219, queued: 167, running: 1, failed: 1 },
+      "219/388项",
+    ],
+    [{ total: 0, discovered: 0 }, "0/0项"],
+    [{ total: 3, queued: 2, failed: 1 }, "0/3项"],
+    [undefined, "—/—项"],
+  ])(
+    "目录进度按已读取阶段列表的数量显示，不把其他状态算入分子",
+    async (catalog, expected) => {
+      const fetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ counts: { catalog } }), {
+            status: 200,
+          }),
+      );
+      await showProgress({}, fetch);
+      const metric = document.querySelector(".history-metrics > div");
+      expect(metric.querySelector("dt").textContent).toBe("目录进度");
+      expect(metric.querySelector("dd").textContent.replace(/\s/g, "")).toBe(
+        expected,
+      );
+      expect(metric.title).toBe(
+        "已读取赛事阶段列表的目录项数 / 来源目录总数，阶段赛程与战报仍需另采",
+      );
+      expect(metric.textContent).not.toContain("完成");
+    },
+  );
+
   it("新会话首批显示当前1而不是旧的完成2", async () => {
     await showProgress({
       status: "running",
@@ -203,7 +233,7 @@ describe("历史后台运行展示", () => {
       );
     progress = {
       has_runnable_work: true,
-      counts: { catalog: { total: 3 }, series: { total: 5 } },
+      counts: { catalog: { total: 3, discovered: 1 }, series: { total: 5 } },
       worker: {
         status: "running",
         alive: true,
@@ -214,6 +244,11 @@ describe("历史后台运行展示", () => {
       },
     };
     await showProgress({}, fetch);
+    expect(
+      document
+        .querySelector(".history-metrics dd")
+        .textContent.replace(/\s/g, ""),
+    ).toBe("1/3项");
     await vi.advanceTimersByTimeAsync(30000);
     expect(document.querySelector(".history-state").textContent).toBe(
       "历史补采进度暂不可用",
@@ -228,14 +263,19 @@ describe("历史后台运行展示", () => {
     expect(document.body.textContent).not.toContain("正在补采");
     expect(document.body.textContent).not.toContain("后台最近心跳正常");
     expect(document.body.textContent).not.toContain("当前第 38 批");
-    expect(document.querySelector(".history-metrics dd").textContent).toContain(
-      "3",
-    );
+    expect(
+      document
+        .querySelector(".history-metrics dd")
+        .textContent.replace(/\s/g, ""),
+    ).toBe("1/3项");
     deliverRefresh(
       new Response(
         JSON.stringify({
           ...progress,
-          counts: { catalog: { total: 4 }, series: { total: 6 } },
+          counts: {
+            catalog: { total: 4, discovered: 2 },
+            series: { total: 6 },
+          },
         }),
         { status: 200 },
       ),
@@ -246,9 +286,11 @@ describe("历史后台运行展示", () => {
     );
     expect(document.body.textContent).toContain("后台最近心跳正常");
     expect(document.body.textContent).toContain("当前第 38 批");
-    expect(document.querySelector(".history-metrics dd").textContent).toContain(
-      "4",
-    );
+    expect(
+      document
+        .querySelector(".history-metrics dd")
+        .textContent.replace(/\s/g, ""),
+    ).toBe("2/4项");
     expect(document.body.textContent).not.toContain("历史补采进度暂不可用");
   });
 
