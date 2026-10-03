@@ -1,7 +1,9 @@
 """采集运行与任务状态；进程退出后仍可继续重试。"""
 
+import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from app import db
@@ -128,6 +130,8 @@ class HistorySeries(db.Model):
     team_a_score = db.Column(db.Integer)
     team_b_score = db.Column(db.Integer)
     source_json = db.Column(db.Text)
+    schedule_raw_file = db.Column(db.Text)
+    schedule_raw_sha256 = db.Column(db.String(64))
     status = db.Column(db.String(30), nullable=False, default='queued', index=True)
     result_ids = db.Column(db.Text, nullable=False, default='[]')
     raw_file = db.Column(db.Text)
@@ -140,10 +144,35 @@ class HistorySeries(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
     def schedule(self):
-        return {
+        schedule = {
             'series_id': self.series_id, 'tournament_id': self.tournament_id,
             'tournament_name': db.session.get(HistoryTournament, self.tournament_id).name,
             'scheduled_at': self.scheduled_at, 'status': self.source_status,
             'is_publist': self.is_publist,
             'series_score': {'team_a': self.team_a_score, 'team_b': self.team_b_score},
         }
+        if self.source_json is not None:
+            schedule['source_row'] = json.loads(self.source_json)
+            archive = self._schedule_archive(schedule['source_row'])
+            if archive is not None:
+                schedule['source_archive'] = archive
+        return schedule
+
+    def _schedule_archive(self, row):
+        if self.schedule_raw_file and self.schedule_raw_sha256:
+            return {'raw_file': self.schedule_raw_file, 'sha256': self.schedule_raw_sha256}
+        if self.schedule_raw_file is not None or self.schedule_raw_sha256 is not None:
+            return None
+        # 迁移前行没有版本绑定；只接受实际仍包含该行的阶段原件。
+        stage = db.session.get(HistoryStage, self.stage_id)
+        if stage is None or not stage.raw_file or not stage.raw_sha256:
+            return None
+        try:
+            encoded = Path(stage.raw_file).read_bytes()
+            rows = json.loads(encoded)
+        except (OSError, ValueError):
+            return None
+        if (hashlib.sha256(encoded).hexdigest() != stage.raw_sha256
+                or not isinstance(rows, list) or sum(item == row for item in rows) != 1):
+            return None
+        return {'raw_file': stage.raw_file, 'sha256': stage.raw_sha256}

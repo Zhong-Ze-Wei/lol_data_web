@@ -189,7 +189,8 @@ def history_schedule(row, tournament_id, tournament_name):
         return {'series_id': sid, 'tournament_id': tournament_id, 'tournament_name': tournament_name,
                 'scheduled_at': scheduled, 'status': str(row['status']) if row.get('status') is not None else None,
                 'is_publist': int(publication) if publication not in (None, '') else None,
-                'series_score': {'team_a': row.get('team_a_win'), 'team_b': row.get('team_b_win')}}
+                'series_score': {'team_a': row.get('team_a_win'), 'team_b': row.get('team_b_win')},
+                'source_row': row}
     except (KeyError, TypeError, ValueError) as exc:
         raise SourceError(f'tournament {tournament_id}: 系列赛 ID/日期/发布状态无效') from exc
 
@@ -306,6 +307,7 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
                                 # 官网模板以此决定展示“数据更新中”还是战报链接，与完赛 status 是两回事。
                                 'is_publist': row.get('is_publist'),
                                 'series_score': [row.get('team_a_win'), row.get('team_b_win')],
+                                'source_row': row,
                             }
                             if sid in schedules and schedules[sid]['tournament_id'] != tid:
                                 raise SourceError(f'series {sid} 被不同赛事引用，停止错误关联')

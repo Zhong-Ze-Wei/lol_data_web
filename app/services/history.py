@@ -22,6 +22,7 @@ from app.services.spider import (
     BudgetExceeded, SourceError, SourceHTTPError, history_schedule, parse_tournament_page,
     result_ids_from_list, tournament_catalog, tournament_stages,
 )
+from app.services.team_names import resolve_team_names
 
 
 def _archive(path, payload):
@@ -169,6 +170,55 @@ def _queue_parent_stage(stage):
     db.session.commit()
 
 
+def _archive_stage_payload(stage, raw_dir, rows, *, failed=False):
+    """已被战报引用的成功原件不覆盖；更正和失败响应各自留档。"""
+    directory = raw_dir / 'history' / 'stages' / str(stage.tournament_id)
+    ordinary = directory / f'{stage.cache_key}.json'
+    if failed:
+        failed_path = directory / 'failed-attempts' / f'{stage.cache_key}-{uuid4().hex}.json'
+        raw = _archive(failed_path, rows)
+        if not stage.raw_file:
+            # 首轮失败的常规原件入口沿用旧行为，此时没有成功来源绑定。
+            _archive(ordinary, rows)
+        return raw
+    if not stage.raw_file:
+        return _archive(ordinary, rows)
+    encoded = json.dumps(rows, ensure_ascii=False, indent=2, default=str).encode('utf-8')
+    digest = hashlib.sha256(encoded).hexdigest()
+    previous = Path(stage.raw_file)
+    if stage.raw_sha256 == digest and previous.is_file() and hashlib.sha256(previous.read_bytes()).hexdigest() == digest:
+        return stage.raw_file, digest
+    versioned = directory / f'{stage.cache_key}-{digest}.json'
+    if versioned.is_file() and hashlib.sha256(versioned.read_bytes()).hexdigest() == digest:
+        return str(versioned), digest
+    return _archive(versioned, rows)
+
+
+def _bind_legacy_stage_archives(stage):
+    """首次新版刷新前，只按当前旧文件的真实 SHA/唯一原行补迁移空绑定。"""
+    series_rows = db.session.query(HistorySeries).filter_by(stage_id=stage.id,
+                                                           schedule_raw_file=None, schedule_raw_sha256=None).all()
+    if not series_rows or not stage.raw_file or not stage.raw_sha256:
+        return
+    try:
+        encoded = Path(stage.raw_file).read_bytes()
+        rows = json.loads(encoded)
+    except (OSError, ValueError):
+        return
+    if hashlib.sha256(encoded).hexdigest() != stage.raw_sha256 or not isinstance(rows, list):
+        return
+    row_counts = Counter(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(',', ':')) for row in rows)
+    for series in series_rows:
+        if series.source_json is None:
+            continue
+        try:
+            row = json.loads(series.source_json)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row_counts[json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(',', ':'))] == 1:
+            series.schedule_raw_file, series.schedule_raw_sha256 = stage.raw_file, stage.raw_sha256
+
+
 def _discover_stage(client, stage, raw_dir, now):
     _start(stage)
     try:
@@ -180,36 +230,51 @@ def _discover_stage(client, stage, raw_dir, now):
             _finish(stage, 'pending', '非当前父阶段且官网统计列表没有发布此阶段；保留 HTTP404 依据')
             return
         raise
-    if not isinstance(rows, list):
-        raise SourceError(f'stage {stage.cache_key}: 赛程结构不是列表')
     tour = db.session.get(HistoryTournament, stage.tournament_id)
     # 先完成全阶段校验，再提交；一个错误不能让半个阶段被标成发现完成。
-    schedules = [(row, history_schedule(row, tour.tournament_id, tour.name)) for row in rows]
-    raw = _archive(raw_dir / 'history' / 'stages' / str(stage.tournament_id) / f'{stage.cache_key}.json', rows)
     seen = set()
+    try:
+        if not isinstance(rows, list):
+            raise SourceError(f'stage {stage.cache_key}: 赛程结构不是列表')
+        schedules = [(row, history_schedule(row, tour.tournament_id, tour.name)) for row in rows]
+        for row, schedule in schedules:
+            sid = schedule['series_id']
+            if sid in seen:
+                raise SourceError(f'stage {stage.cache_key}: 重复 series_id={sid}')
+            seen.add(sid)
+            series = db.session.get(HistorySeries, sid)
+            if series is not None and series.tournament_id != tour.tournament_id:
+                raise SourceError(f'series {sid}: 同一系列出现在两个赛事，保留冲突以人工核对')
+            for field in ('team_a_win', 'team_b_win'):
+                if row.get(field) not in (None, ''):
+                    int(row[field])
+    except (SourceError, TypeError, ValueError):
+        _archive_stage_payload(stage, raw_dir, rows, failed=True)
+        raise
+    raw = _archive_stage_payload(stage, raw_dir, rows)
+    _bind_legacy_stage_archives(stage)
+    stage.raw_file, stage.raw_sha256 = raw
     for row, schedule in schedules:
         sid = schedule['series_id']
-        if sid in seen:
-            raise SourceError(f'stage {stage.cache_key}: 重复 series_id={sid}')
-        seen.add(sid)
         series = db.session.get(HistorySeries, sid)
-        if series is not None and series.tournament_id != tour.tournament_id:
-            raise SourceError(f'series {sid}: 同一系列出现在两个赛事，保留冲突以人工核对')
         if series is None:
             series = HistorySeries(series_id=sid, tournament_id=tour.tournament_id, stage_id=stage.id)
             db.session.add(series)
-        source_changed = series.source_json is not None and series.source_json != json.dumps(row, ensure_ascii=False)
+        source_changed = series.source_json is not None and json.loads(series.source_json) != row
+        if source_changed or series.source_json is None:
+            series.stage_id = stage.id
         series.scheduled_at = schedule['scheduled_at']
         series.source_status, series.is_publist = schedule['status'], schedule['is_publist']
         for field, value in (('team_a_score', row.get('team_a_win')), ('team_b_score', row.get('team_b_win'))):
             setattr(series, field, int(value) if value not in (None, '') else None)
         series.source_json = json.dumps(row, ensure_ascii=False)
+        series.schedule_raw_file, series.schedule_raw_sha256 = raw
         if _pending(schedule, now):
             series.status = 'pending'
             series.next_retry_at = utc_now() + timedelta(days=1)
         elif series.status == 'pending' or series.status is None or (source_changed and series.status == 'discovered'):
             series.status, series.next_retry_at = 'queued', None
-        if series.status == 'discovered':
+        if series.status == 'discovered' or source_changed:
             # 赛程被更正时无需重下载所有原始战报，但需要幂等回填业务日期/赛事信息。
             _queue_series_results(series, raw_dir)
     stage.series_count = len(seen)
@@ -222,6 +287,27 @@ def _structure_complete(match):
     players = db.session.query(func.count(Player.id)).filter_by(match_id=match.match_id).scalar()
     teams = db.session.query(func.count(Team.id)).filter_by(match_id=match.match_id).scalar()
     return players == 10 and teams == 2
+
+
+def _cached_team_names_changed(match, schedule, raw):
+    """只有本地详情与赛程 ID/BO 匹配才重排名称；候选文字差异不足为证。"""
+    if match is None or not match.verified or not raw.is_file():
+        return False
+    try:
+        payload = json.loads(raw.read_bytes())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict) or payload.get('code', 200) not in (200, '200'):
+        return False
+    data = payload.get('data')
+    if not isinstance(data, dict) or str(data.get('gameID')) != '1':
+        return False
+    info = data.get('result_list')
+    if not isinstance(info, dict) or (data.get('resultID') is not None and str(data['resultID']) != str(match.match_id)):
+        return False
+    names, provenance = resolve_team_names(data, schedule, {side: info.get(f'{side}_name') for side in ('red', 'blue')})
+    return (provenance['selected_source'] == 'schedule'
+            and (names['red'] != match.red_team_name or names['blue'] != match.blue_team_name))
 
 
 def _queue_series_results(series, raw_dir):
@@ -237,9 +323,13 @@ def _queue_series_results(series, raw_dir):
         metadata = (match is not None and match.tournament_id == series.tournament_id
                     and match.series_id == series.series_id
                     and (series.scheduled_at is None or (match.date_source == 'schedule' and match.date == series.scheduled_at)))
+        raw = raw_dir / 'scoregg' / f'{rid}.json'
+        if _cached_team_names_changed(match, schedule, raw):
+            task.status, task.next_retry_at = 'queued', None
+            continue
         if task.status == 'source_incomplete' and (match is None or metadata):
             continue
-        if not metadata or not _structure_complete(match) or not (raw_dir / 'scoregg' / f'{rid}.json').is_file():
+        if not metadata or not _structure_complete(match) or not raw.is_file():
             task.status, task.next_retry_at = 'queued', None
 
 
@@ -300,27 +390,33 @@ def _fetch_task(client, task, raw_dir, run_id, now):
         schedule = series.schedule()
     series_allows_incomplete = (series is not None and series.source_status == '2'
                                and (series.scheduled_at is None or series.scheduled_at < now - timedelta(days=14)))
+    existing = db.session.query(Match).filter_by(match_id=task.result_id).first()
+    previous = (existing.team_name_provenance if existing is not None
+                and existing.source == 'scoregg' and existing.verified else None)
     # 旧 CSV 只提供已知单局 ID；是否 LOL、是否结束必须由详情本身确认。
     legacy_candidate = (series is None
                         and (task.scheduled_at is None or task.scheduled_at < now - timedelta(days=14))
-                        and db.session.query(Match).filter_by(
-                            match_id=task.result_id, source='legacy', verified=False).first() is not None)
+                        and existing is not None and existing.source == 'legacy' and not existing.verified)
     path = raw_dir / 'scoregg' / f'{task.result_id}.json'
     payload, reused = None, False
     # 已有原始详情可以重新核验并回填真实赛程；没有合法原始证据就必须请求。
     if path.is_file():
         try:
-            cached = json.loads(path.read_text(encoding='utf-8'))
+            encoded = path.read_bytes()
+            cached = json.loads(encoded)
             cached_allows_incomplete = series_allows_incomplete or (
                 legacy_candidate and has_finished_lol_evidence(cached, task.result_id))
-            normalize_result(cached, task.result_id, schedule, allow_incomplete=cached_allows_incomplete)
+            normalize_result(cached, task.result_id, schedule, allow_incomplete=cached_allows_incomplete,
+                             prior_team_name_provenance=previous)
             payload, reused = cached, True
+            schedule['detail_archive'] = {'raw_file': str(path), 'sha256': hashlib.sha256(encoded).hexdigest()}
         except (OSError, ValueError, TypeError):
             payload = None
     start_task(task.result_id, schedule, run_id)
     if payload is None:
         payload = client.get_result(task.result_id)
-        _archive(path, payload)
+        raw_file, sha256 = _archive(path, payload)
+        schedule['detail_archive'] = {'raw_file': raw_file, 'sha256': sha256}
     allow_incomplete = series_allows_incomplete or (legacy_candidate and has_finished_lol_evidence(payload, task.result_id))
     outcome = ingest_result(payload, task.result_id, schedule, run_id, allow_incomplete=allow_incomplete)
     return {**outcome.to_dict(), 'reused_raw': reused, 'raw_file': str(path)}
@@ -385,13 +481,57 @@ def _check_recovery_references(recovered_names):
                 raise ValueError('恢复昵称的原始依据 SHA 已改变')
 
 
+def _repair_schedule_evidence(schedule):
+    """冻结实际赛程阶段；未关联原件的 legacy 不制造第二来源。"""
+    if 'source_row' not in schedule:
+        return None
+    archive = schedule.get('source_archive')
+    series = db.session.get(HistorySeries, schedule['series_id'])
+    stage = db.session.get(HistoryStage, series.stage_id)
+    row = schedule['source_row']
+    if archive is not None:
+        encoded = Path(archive['raw_file']).read_bytes()
+        if hashlib.sha256(encoded).hexdigest() != archive['sha256']:
+            raise ValueError('赛程阶段原件 SHA 与持久依据不一致')
+        rows = json.loads(encoded)
+        if not isinstance(rows, list) or sum(item == row for item in rows) != 1:
+            raise ValueError('赛程阶段原件未唯一包含持久赛程原行')
+    return {'series_id': series.series_id, 'stage_id': stage.id, 'source_row': row,
+            'source_row_sha256': hashlib.sha256(json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                                          separators=(',', ':')).encode('utf-8')).hexdigest(),
+            'source_archive': archive,
+            'series_archive_binding': {'raw_file': series.schedule_raw_file, 'sha256': series.schedule_raw_sha256}}
+
+
+def _check_schedule_evidence(evidence):
+    if evidence is None:
+        return
+    current = db.session.query(HistorySeries.stage_id, HistorySeries.source_json,
+                               HistorySeries.schedule_raw_file, HistorySeries.schedule_raw_sha256).filter_by(
+        series_id=evidence['series_id']).first()
+    if current is None or current.stage_id != evidence['stage_id'] or json.loads(current.source_json) != evidence['source_row']:
+        raise ValueError('审计后持久赛程原行或阶段关联改变，未重放此局')
+    archive = evidence['source_archive']
+    binding = {'raw_file': current.schedule_raw_file, 'sha256': current.schedule_raw_sha256}
+    if binding != evidence['series_archive_binding']:
+        raise ValueError('审计后系列赛程版本绑定改变，未重放此局')
+    if archive is None:
+        return
+    if binding['raw_file'] is None and binding['sha256'] is None:
+        stage = db.session.query(HistoryStage.raw_file, HistoryStage.raw_sha256).filter_by(id=current.stage_id).first()
+        if stage is None or stage.raw_file != archive['raw_file'] or stage.raw_sha256 != archive['sha256']:
+            raise ValueError('审计后赛程阶段归档依据改变，未重放此局')
+    if hashlib.sha256(Path(archive['raw_file']).read_bytes()).hexdigest() != archive['sha256']:
+        raise ValueError('审计后赛程 raw hash 改变，未重放此局')
+
+
 def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, names_by_source_id=None):
     """显式指定归档单局，先写 before/after 与身份依据，再原子重放；零 HTTP。"""
     raw_dir, reports_dir = Path(raw_dir), Path(reports_dir)
     report_id = str(uuid4())
     report = {'repair_id': report_id, 'mode': 'apply' if apply else 'audit',
               'started_at': utc_now().isoformat() + 'Z', 'request_count': 0,
-              'rule': '以公开 raw 重建指标 NULL 与部分名单；昵称仅取唯一同源 ID 依据；原 CSV/raw 不修改',
+              'rule': '以公开 raw 重建指标 NULL 与部分名单；昵称仅取唯一同源 ID 依据；战队名仅取同 BO/teamID 赛程依据；原 CSV/raw 不修改',
               'checked': 0, 'changed_records': 0, 'changed_fields': 0,
               'cleared_unsupported_fields': 0, 'applied': 0, 'blocked': 0, 'failed': 0, 'records': []}
     path = reports_dir / f'verified-raw-repair-{report_id}.json'
@@ -406,8 +546,13 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
             encoded = raw.read_bytes()
             payload = json.loads(encoded)
             schedule = _raw_repair_schedule(match, result_id)
+            schedule['detail_archive'] = {'raw_file': str(raw), 'sha256': hashlib.sha256(encoded).hexdigest()}
+            item['schedule'] = schedule
+            item['schedule_evidence'] = _repair_schedule_evidence(schedule)
+            previous = (match.team_name_provenance if match is not None
+                        and match.source == 'scoregg' and match.verified else None)
             normalized = normalize_result(payload, result_id, schedule, allow_incomplete=True,
-                                          names_by_source_id=names_by_source_id)
+                                          names_by_source_id=names_by_source_id, prior_team_name_provenance=previous)
             _check_recovery_references(normalized.get('recovered_player_names', []))
             item['sha256'] = hashlib.sha256(encoded).hexdigest()
             item['changes'] = _raw_repair_changes(normalized, result_id)
@@ -415,6 +560,10 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
             item['missing_roster_slots'] = normalized.get('missing_roster_slots', [])
             item['recovered_player_names'] = normalized.get('recovered_player_names', [])
             item['invalid_metric_groups'] = normalized.get('invalid_metric_groups', [])
+            item['team_name_provenance'] = {
+                'before': match.team_name_provenance if match is not None else None,
+                'after': normalized['matches'][0].get('team_name_provenance'),
+            }
         except (OSError, ValueError, TypeError) as exc:
             item.update(status='blocked', error=f'{type(exc).__name__}: {exc}')
             report['blocked'] += 1
@@ -449,11 +598,12 @@ def repair_archived_results(raw_dir, reports_dir, *, result_ids, apply=False, na
                 continue
             try:
                 _check_recovery_references(item['recovered_player_names'])
-            except (OSError, ValueError) as exc:
+                _check_schedule_evidence(item['schedule_evidence'])
+            except (OSError, ValueError, TypeError) as exc:
                 item.update(status='blocked', error=str(exc))
                 report['blocked'] += 1
                 continue
-            outcome = ingest_result(json.loads(encoded), item['result_id'], _raw_repair_schedule(match, item['result_id']),
+            outcome = ingest_result(json.loads(encoded), item['result_id'], item['schedule'],
                                     allow_incomplete=True, replace_existing=True, names_by_source_id=names_by_source_id)
             item.update(status=outcome.status, error=outcome.error)
             if outcome.status in ('imported', 'source_incomplete'):
