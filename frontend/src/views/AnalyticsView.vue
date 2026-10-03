@@ -223,7 +223,11 @@ const teamChart = computed(() => {
       </div>
     </form>
     <p class="filter-note">
-      历史日期来自源数据更新时间。分析范围仅覆盖已收录样本，胜率使用结果已知的比赛。
+      {{
+        (tab === "players"
+          ? players.data.value?.date_policy
+          : teams.data.value?.date_policy) || "日期筛选仅包含已确认赛程。"
+      }}分析范围仅覆盖已收录样本，胜率使用结果已知的比赛。
     </p>
   </section>
   <template v-if="tab === 'players'"

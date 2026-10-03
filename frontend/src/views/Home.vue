@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onScopeDispose, ref } from "vue";
+import { computed, nextTick, onScopeDispose, ref } from "vue";
 import { request } from "../services/api.js";
 import { useResource } from "../composables/useResource.js";
 import {
@@ -9,11 +9,12 @@ import {
   date,
   detailLink,
 } from "../utils/format.js";
-import { renderAnswer } from "../utils/markdown.js";
+import { queryBody } from "../utils/ai.js";
 import ResourceState from "../components/ResourceState.vue";
-import DataTable from "../components/DataTable.vue";
+import AIResult from "../components/AIResult.vue";
 import Icon from "../components/Icon.vue";
 import MatchStatus from "../components/MatchStatus.vue";
+import HistoryProgress from "../components/HistoryProgress.vue";
 
 const stats = useResource((signal) => request("/api/stats", { signal }));
 const recent = useResource((signal) =>
@@ -47,7 +48,8 @@ const prompt = ref("");
 const aiLoading = ref(false);
 const aiError = ref("");
 const result = ref(null);
-const answer = computed(() => renderAnswer(result.value?.answer));
+const context = ref(null);
+const resultElement = ref(null);
 const examples = ["参赛最多的五位选手是谁？", "比较 T1 和 GEN 的胜率。"];
 let aiController;
 onScopeDispose(() => aiController?.abort());
@@ -60,11 +62,14 @@ async function ask() {
   try {
     const data = await request("/api/ai/query", {
       method: "POST",
-      body: { prompt: prompt.value.trim() },
+      body: queryBody(prompt.value, context.value),
       signal: aiController.signal,
     });
     if (data.result?.error) throw new Error(data.result.error);
     result.value = data.result;
+    context.value = data.result.context || null;
+    await nextTick();
+    resultElement.value?.scrollIntoView({ block: "start" });
   } catch (error) {
     if (error.name !== "AbortError") aiError.value = error.message;
   } finally {
@@ -74,7 +79,15 @@ async function ask() {
 function clear() {
   prompt.value = "";
   result.value = null;
+  context.value = null;
   aiError.value = "";
+}
+async function chooseQuestion(question) {
+  prompt.value = question;
+  await nextTick();
+  const field = document.getElementById("ai-prompt");
+  field.focus({ preventScroll: true });
+  field.scrollIntoView({ block: "center" });
 }
 function rowLink(row) {
   if (active.value.collection === "matches")
@@ -116,6 +129,7 @@ function rowLink(row) {
       >
     </section></ResourceState
   >
+  <HistoryProgress />
   <div class="portal-grid">
     <section class="panel recent-panel">
       <header class="panel-header">
@@ -181,7 +195,9 @@ function rowLink(row) {
       <section class="panel ai-panel">
         <header class="panel-header">
           <h2><Icon name="ai" />AI 数据助手</h2>
-          <span class="tag">自然语言查询</span>
+          <span class="tag">{{
+            context?.plan ? "继续当前分析" : "自然语言查询"
+          }}</span>
         </header>
         <p class="muted ai-description">
           输入赛事问题，获得基于数据库的回答和查询结果。
@@ -206,7 +222,7 @@ function rowLink(row) {
                 :disabled="aiLoading"
                 @click="clear"
               >
-                清空</button
+                {{ context?.plan ? "新问题" : "清空" }}</button
               ><button
                 class="button small"
                 :disabled="aiLoading || !prompt.trim()"
@@ -230,20 +246,12 @@ function rowLink(row) {
           <span class="spinner"></span>正在查询并整理回答…
         </div>
         <div v-if="aiError" class="ai-error" role="alert">{{ aiError }}</div>
-        <div v-if="result" class="ai-result">
-          <div class="markdown" v-html="answer"></div>
-          <details v-if="result.data?.length">
-            <summary>查看查询结果 · {{ result.data.length }} 条</summary>
-            <DataTable :rows="result.data" />
-          </details>
-          <details v-if="result.sql">
-            <summary>查看查询 SQL</summary>
-            <pre><code>{{ result.sql }}</code></pre>
-          </details>
-          <p v-if="!result.data?.length" class="muted small-text">
-            本次查询没有返回数据行。
-          </p>
-        </div>
+        <a
+          v-if="result"
+          class="ai-result-link text-link"
+          href="#ai-analysis-result"
+          >查看本次分析结果 <Icon name="arrow"
+        /></a>
       </section>
       <section class="panel ranking-panel">
         <header class="panel-header">
@@ -301,6 +309,14 @@ function rowLink(row) {
         ></ResourceState>
       </section>
     </div>
+  </div>
+  <div
+    v-if="result"
+    id="ai-analysis-result"
+    ref="resultElement"
+    class="section-space ai-result-anchor"
+  >
+    <AIResult :result="result" @choose="chooseQuestion" />
   </div>
   <div class="home-lower-grid">
     <section class="panel quick-panel">

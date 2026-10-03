@@ -127,7 +127,7 @@ function page(value) {
       </div>
     </form>
     <p v-if="kind === 'match'" class="filter-note">
-      日期筛选包含结束月份；历史记录日期来自源数据更新时间。
+      日期筛选仅包含已确认赛程，包含结束月份；未筛日期时保留全部历史记录。
     </p>
     <div class="results-header">
       <div>

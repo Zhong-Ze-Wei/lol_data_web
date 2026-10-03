@@ -29,6 +29,10 @@ const labels = {
   partial: "部分完成",
   failed: "采集失败",
   cancelled: "已停止",
+  budget_exhausted: "正在分批补采",
+  interrupted: "采集已中断，等待恢复",
+  waiting_retry: "等待重试",
+  stale: "源站暂无近期赛程",
 };
 const syncLabel = computed(() =>
   sync.value?.last_run
@@ -90,7 +94,7 @@ function search() {
       ><span v-if="updatedAt" class="sync-time"
         >最近更新 {{ timestamp(updatedAt) }}（香港时间）</span
       ><span v-if="sync?.data_range?.min_date" class="sync-range"
-        >收录日期：{{ date(sync.data_range.min_date) }} 至
+        >已确认赛程：{{ date(sync.data_range.min_date) }} 至
         {{ date(sync.data_range.max_date) }}</span
       ><button
         class="text-button sync-refresh"
@@ -120,7 +124,7 @@ function search() {
       >
     </div>
     <p>
-      数据范围以已收录样本为准。历史记录日期来自源数据更新时间，尚未验证为比赛开赛日期。
+      数据范围以已收录样本为准。部分历史记录仍只有源更新时间，时间分析仅使用确认赛程。
     </p>
   </footer>
 </template>

@@ -155,7 +155,10 @@ function page(value) {
               :label="`${name} 月度${trendLabel}`"
             />
             <p class="chart-note">
-              悬停查看每月原始指标和比赛样本数。历史记录按源数据更新时间分月。
+              {{
+                analytics.data.value?.date_policy ||
+                "月度趋势仅使用已确认赛程，按开赛日期分月。"
+              }}悬停查看原始指标和比赛样本数。
             </p></ResourceState
           >
         </section>
