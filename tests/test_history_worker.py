@@ -19,3 +19,12 @@ def test_no_ready_work_can_still_require_retry_or_attention():
     assert next_action(2, {"next_retry_at": "2026-10-03T10:00:00Z"}) == "retry_later"
     assert next_action(2, {"has_runnable_work": True}) == "continue"
     assert next_action(2, {}) == "failed"
+
+
+def test_pending_task_becoming_due_at_batch_end_keeps_worker_running():
+    coverage = {
+        "snapshot_completed": True,
+        "has_runnable_work": True,
+        "complete_available": False,
+    }
+    assert next_action(0, coverage) == "continue"

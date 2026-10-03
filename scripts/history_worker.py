@@ -31,10 +31,10 @@ def next_action(code, coverage):
         return "locked"
     if code not in (0, 2):
         return "failed"
-    if coverage.get("snapshot_completed"):
-        return "completed"
     if coverage.get("has_runnable_work"):
         return "continue"
+    if coverage.get("snapshot_completed"):
+        return "completed"
     if coverage.get("next_retry_at"):
         return "retry_later"
     return "failed"
