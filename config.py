@@ -1,25 +1,26 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# 先加载 .env 文件（如果有）
-load_dotenv()
-
-LOG_DIR = 'logs/'
-PROXY = None
-SPIDER_DEBUG = True
-LAST_MATCH_ID = 61779  # 上次爬取到的最后一个比赛ID
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 
 class Config:
-    # 数据库配置
-    SQLALCHEMY_DATABASE_URI = (
-        f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+    DATA_DIR = BASE_DIR / "data"
+    SQLALCHEMY_DATABASE_URI = os.getenv(
+        "DATABASE_URL", f"sqlite:///{(DATA_DIR / 'lol-data.db').as_posix()}"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-    # Flask密钥
-    SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here')
-
-    # DeepSeek API Key
-    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
+    AUTO_CREATE_DB = SQLALCHEMY_DATABASE_URI.startswith("sqlite:")
+    HOST = os.getenv("HOST", "127.0.0.1")
+    PORT = int(os.getenv("PORT", "5100"))
+    AI_API_KEY = os.getenv("AI_API_KEY") or os.getenv("ALIYUN_APP_KEY")
+    AI_MODEL = os.getenv("AI_MODEL", "qwen-plus")
+    AI_MAX_ROWS = 100
+    AI_TIMEOUT = 45
+    SCHEDULE_TIME = os.getenv("SCHEDULE_TIME", "08:00")
+    SCHEDULE_TIMEZONE = "Asia/Hong_Kong"
+    MAX_CONTENT_LENGTH = 16 * 1024

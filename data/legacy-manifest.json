@@ -1,0 +1,38 @@
+[
+  {
+    "file": "data/raw/player_data.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol爬虫\\data\\player_data.csv",
+    "sha256": "f2ca304727bbe973a51910a4964037d9f551a9395dd37e2f678e312625ef54dc",
+    "bytes": 28902299
+  },
+  {
+    "file": "data/raw/team_data.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol爬虫\\data\\team_data.csv",
+    "sha256": "56d782318468396e62dd3e6f10a0d2a1f9d9a76ed711c2408023bae57f9ffa71",
+    "bytes": 4035833
+  },
+  {
+    "file": "data/raw/player_data13.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol爬虫\\data\\player_data13.csv",
+    "sha256": "7f88af948c97b49c43d55d75e9b7b916698c972f74fcb4d4501f0f1dd843a702",
+    "bytes": 1532392
+  },
+  {
+    "file": "data/raw/team_data13.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol爬虫\\data\\team_data13.csv",
+    "sha256": "732fe3bc282404bc356c940c7cba5a9c034f970f4a3735e43f7b8e417f2be46d",
+    "bytes": 176770
+  },
+  {
+    "file": "data/raw/player_data_s13.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol_data_show\\src\\data\\raw\\player_data_s13.csv",
+    "sha256": "b44588598e06a334c28282ebea7490203348408f6b8d253e3d8fd68a51dd3d21",
+    "bytes": 580592
+  },
+  {
+    "file": "data/raw/team_data_s13.csv",
+    "source": "E:\\ZZ's_Code\\ZZ's_PY\\lol_data_show\\src\\data\\raw\\team_data_s13.csv",
+    "sha256": "a48b81de4d4f9946952b4693a6b72d6dbd886d6edb0721f39738c9decdaaeec2",
+    "bytes": 62733
+  }
+]

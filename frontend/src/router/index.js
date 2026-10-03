@@ -1,67 +1,85 @@
-import Vue from 'vue'
-import VueRouter from 'vue-router'
-import PlayerList from '../views/PlayerList.vue'
-import PlayerDetail from '../views/PlayerDetail.vue'
-import MatchList from '../views/MatchList.vue'
+import { createRouter, createWebHistory } from "vue-router";
 
-Vue.use(VueRouter)
-
-const routes = [
-  {
-    path: '/',
-    name: 'Home',
-    component: () => import('../views/Home.vue')
+const directory = () => import("../views/DirectoryView.vue");
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: "/",
+      name: "home",
+      component: () => import("../views/Home.vue"),
+      meta: { title: "数据总览" },
+    },
+    {
+      path: "/analytics",
+      name: "analytics",
+      component: () => import("../views/AnalyticsView.vue"),
+      meta: { title: "比较分析" },
+    },
+    {
+      path: "/player",
+      name: "players",
+      component: directory,
+      props: { kind: "player" },
+      meta: { title: "选手档案" },
+    },
+    {
+      path: "/player/:name",
+      name: "player",
+      component: () => import("../views/PlayerDetail.vue"),
+      meta: { title: "选手详情" },
+    },
+    {
+      path: "/match",
+      name: "matches",
+      component: directory,
+      props: { kind: "match" },
+      meta: { title: "比赛记录" },
+    },
+    {
+      path: "/match/:match_id",
+      name: "match",
+      component: () => import("../views/MatchDetail.vue"),
+      meta: { title: "比赛详情" },
+    },
+    {
+      path: "/team",
+      name: "teams",
+      component: directory,
+      props: { kind: "team" },
+      meta: { title: "战队档案" },
+    },
+    {
+      path: "/team/:team_name",
+      name: "team",
+      component: () => import("../views/TeamDetail.vue"),
+      meta: { title: "战队详情" },
+    },
+    {
+      path: "/hero",
+      name: "heroes",
+      component: directory,
+      props: { kind: "hero" },
+      meta: { title: "英雄数据" },
+    },
+    {
+      path: "/hero/:hero_name",
+      name: "hero",
+      component: () => import("../views/HeroDetail.vue"),
+      meta: { title: "英雄详情" },
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      component: () => import("../views/NotFound.vue"),
+      meta: { title: "页面未找到" },
+    },
+  ],
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    return to.path === from.path ? undefined : { top: 0 };
   },
-  {
-    path: '/player',
-    name: 'PlayerList',
-    component: PlayerList
-  },
-  {
-    path: '/player/:name',
-    name: 'PlayerDetail',
-    component: PlayerDetail,
-    props: true
-  },
-  {
-    path: '/match',
-    name: 'MatchList',
-    component: MatchList
-  },
-  {
-    path: '/match/:match_id',
-    name: 'MatchDetail',
-    component: () => import('../views/MatchDetail.vue')
-  },
-  {
-    path: '/team',
-    name: 'TeamList',
-    component: () => import('../views/TeamList.vue')
-  },
-  {
-    path: '/team/:team_name',
-    name: 'TeamDetail',
-    component: () => import('../views/TeamDetail.vue'),
-    props: true
-  },
-  // 启用英雄相关的路由
-  {
-    path: '/hero',
-    name: 'HeroList',
-    component: () => import('../views/HeroList.vue')
-  },
-  {
-    path: '/hero/:hero_name',
-    name: 'HeroDetail',
-    component: () => import('../views/HeroDetail.vue'),
-    props: true
-  }
-]
-
-const router = new VueRouter({
-  mode: 'history',
-  base: process.env.BASE_URL,
-  routes
-})
-
-export default router
+});
+router.afterEach((to) => {
+  document.title = `${to.meta.title} · LOL DATA`;
+});
+export default router;

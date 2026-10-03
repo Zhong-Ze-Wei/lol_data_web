@@ -1,212 +1,93 @@
-from flask import Blueprint, render_template, request, jsonify
-from app.models.player import Player
-from app.models.match import Match
-from app.models.team import Team
+from flask import Blueprint, jsonify, request
 from sqlalchemy import func
-from sqlalchemy.orm import aliased
+
 from app import db
+from app.models import Match, Player, Team
+from app.routes.common import (POSITION_LABELS, canonical_position, match_data, page_args, pagination_data,
+                               player_data, player_known_results, player_wins, position_arg, position_filter,
+                               rounded, team_data, win_rate)
+from app.services.analytics import player_analytics
 
-player_bp = Blueprint("player", __name__, url_prefix='/player')
+player_bp = Blueprint('player', __name__, url_prefix='/player')
 
-@player_bp.route('/api/list', methods=['GET'])
+
+@player_bp.route('/api/list')
 def get_players():
-    """获取选手列表API"""
-    # 获取请求参数
-    team_name = request.args.get('team_name')  # 筛选条件：战队名称
-    position = request.args.get('position')    # 筛选条件：分路
-    player_name = request.args.get('player_name')  # 筛选条件：选手名称
-    page = request.args.get('page', 1, type=int)  # 分页，默认为第1页
-
-    # 子查询：计算每个选手的出场次数和最近比赛时间
-    player_stats_subquery = (
-        db.session.query(
-            Player.name.label("name"),
-            func.count(Player.name).label("appearance_count"),
-            func.max(Player.date).label("latest_date")
-        )
-        .group_by(Player.name)
-        .subquery()
+    page, per_page = page_args(24)
+    position = position_arg()
+    player_name = request.args.get('player_name', '').strip()
+    records = Player.query.filter(
+        Player.name.isnot(None), Player.name != '',
     )
-
-    # 主查询：获取选手名、头像、最近战队和分路，以及出场次数
-    PlayerAlias = aliased(Player)
-    query = db.session.query(
-        PlayerAlias.name,
-        PlayerAlias.pic,
-        PlayerAlias.team_name,
-        PlayerAlias.position,
-        player_stats_subquery.c.latest_date,  # 添加最新比赛时间
-        player_stats_subquery.c.appearance_count  # 添加出场次数
-    ).join(
-        player_stats_subquery,
-        (PlayerAlias.name == player_stats_subquery.c.name) &
-        (PlayerAlias.date == player_stats_subquery.c.latest_date)
-    )
-
-    # 根据战队名进行筛选
-    if team_name:
-        query = query.filter(PlayerAlias.team_name.ilike(f'%{team_name}%'))
-
-    # 根据分路进行筛选
-    if position:
-        query = query.filter(PlayerAlias.position.ilike(f'%{position}%'))
-        
-    # 根据选手名称进行筛选
     if player_name:
-        query = query.filter(PlayerAlias.name.ilike(f'%{player_name}%'))
-
-    # 去重，避免重复的选手
-    query = query.distinct()
-
-    # 按照出场次数降序排列，优先展示出场次数多的选手
-    query = query.order_by(player_stats_subquery.c.appearance_count.desc())
-
-    # 分页
-    players = query.paginate(page=page, per_page=24, error_out=False)
-
-    # 构造返回数据
-    players_data = []
-    for player in players.items:
-        players_data.append({
-            'name': player.name,
-            'pic': player.pic,
-            'team_name': player.team_name,
-            'position': player.position,
-            'appearance_count': player.appearance_count,
-            'latest_date': player.latest_date.strftime('%Y-%m-%d') if player.latest_date else None
-        })
-
-    return jsonify({
-        'players': players_data,
-        'pagination': {
-            'page': players.page,
-            'pages': players.pages,
-            'has_prev': players.has_prev,
-            'has_next': players.has_next,
-            'prev_num': players.prev_num,
-            'next_num': players.next_num
-        }
-    })
-
-@player_bp.route('/api/<string:name>', methods=['GET'])
-def get_player_matches(name):
-    from urllib.parse import unquote
-    name = unquote(name)
-
-    # 查询该选手所有比赛记录
-    players = Player.query.filter_by(name=name).all()
-    if not players:
-        return jsonify({'error': '该玩家未收录'}), 404
-
-    # 提取所有比赛ID
-    match_ids = list(set(p.match_id for p in players))
-
-    # 查询所有比赛和战队数据
-    matches = Match.query.filter(Match.match_id.in_(match_ids)).order_by(Match.date.desc()).all()
-    teams = Team.query.filter(Team.match_id.in_(match_ids)).all()
-
-    # 构造比赛列表
-    matches_data = [{
-        'match_id': m.match_id,
-        'date': m.date.strftime('%Y-%m-%d') if m.date else None,
-        'game_time': m.game_time,
-        'red_team_name': m.red_team_name,
-        'blue_team_name': m.blue_team_name,
-        'win_team_name': m.win_team_name,
-        'mvp': m.mvp
-    } for m in matches]
-
-    # 构造战队列表
-    teams_data = [{
-        'match_id': t.match_id,
-        'team_name': t.team_name,
-        'team_flag': t.team_flag,
-        'result': t.result,
-        'kill': t.kill,
-        'death': t.death,
-        'assist': t.assist,
-        'money': t.money,
-        'tower': t.tower
-    } for t in teams]
-
-    # 构造选手比赛数据列表
-    players_data = [{
-        'date': p.date.strftime('%Y-%m-%d') if p.date else None,
-        'hero': p.hero,
-        'hero_lv': p.hero_lv,
-        'kda': p.kda,
-        'kills': p.kills,
-        'deaths': p.deaths,
-        'assists': p.assists,
-        'part': p.part,
-        'atk': p.atk,
-        'atk_p': p.atk_p,
-        'atk_m': p.atk_m,
-        'def_': p.def_,
-        'def_p': p.def_p,
-        'def_m': p.def_m,
-        'hits': p.hits,
-        'money': p.money,
-        'result': p.result,
-        'position': p.position,
-        'pic': p.pic,
-        'match_id': p.match_id
-    } for p in players]
-
-    total_matches = len(players_data)
-    if total_matches == 0:
-        return jsonify({'error': '该玩家暂无比赛数据'}), 404
-
-    # 计算胜率（result字段为 '1' 表示胜利）
-    win_count = sum(1 for p in players_data if p['result'] == '1')
-    win_rate = round(win_count / total_matches * 100, 1)
-
-    # 计算KDA均值，防止除零
-    avg_kills = round(sum(p['kills'] for p in players_data) / total_matches, 1)
-    avg_deaths = round(sum(p['deaths'] for p in players_data) / total_matches, 1)
-    avg_assists = round(sum(p['assists'] for p in players_data) / total_matches, 1)
-
-    # 计算经济均值和攻击防御相关均值
-    avg_money = round(sum(p['money'] for p in players_data if p['money']) / total_matches, 1)
-    avg_atk_m = round(sum(p['atk_m'] for p in players_data if p['atk_m']) / total_matches, 1)
-    avg_def_m = round(sum(p['def_m'] for p in players_data if p['def_m']) / total_matches, 1)
-
-    # 统计不同英雄数量（去重）
-    hero_pool = len(set(p['hero'] for p in players_data if p['hero']))
-
-    # 选手位置取最常见位置
-    from collections import Counter
-    positions = [p['position'] for p in players_data if p['position']]
-    position_counter = Counter(positions)
-    main_position = position_counter.most_common(1)[0][0] if positions else '未知'
-
-    # 选手头像，取最近比赛的
-    pic = next((p['pic'] for p in sorted(players_data, key=lambda x: x['date'], reverse=True) if p['pic']), '')
-
-    # 生成选手简介
-    bio = (
-        f"{name}是一位职业{main_position}选手，职业生涯共参加{total_matches}场比赛，"
-        f"胜率{win_rate}%。场均KDA为{avg_kills}/{avg_deaths}/{avg_assists}，"
-        f"场均经济{avg_money}，场均输出{avg_atk_m}，场均承伤{avg_def_m}。"
-        f"共使用过{hero_pool}个不同英雄。"
+        records = records.filter(Player.name.ilike(f'%{player_name}%'))
+    counts = records.with_entities(Player.name, func.count(Player.id).label('appearance_count')).group_by(Player.name).subquery()
+    latest = records.with_entities(
+        Player.id.label('id'), Player.name.label('name'),
+        func.row_number().over(partition_by=Player.name, order_by=(Player.date.desc(), Player.id.desc())).label('rank'),
+    ).subquery()
+    query = db.session.query(Player, counts.c.appearance_count).join(
+        latest, Player.id == latest.c.id,
+    ).join(counts, latest.c.name == counts.c.name).filter(latest.c.rank == 1)
+    team_name = request.args.get('team_name', '').strip()
+    if team_name:
+        query = query.filter(Player.team_name.ilike(f'%{team_name}%'))
+    if position:
+        query = query.filter(position_filter(Player.position, position))
+    pagination = query.order_by(counts.c.appearance_count.desc(), Player.name).paginate(
+        page=page, per_page=per_page, error_out=False,
     )
+    players = [{
+        'name': player.name, 'pic': player.pic, 'team_name': player.team_name,
+        'position': player.position, 'appearance_count': count,
+        'latest_date': player.date.strftime('%Y-%m-%d') if player.date else None,
+    } for player, count in pagination.items]
+    return jsonify(players=players, pagination=pagination_data(pagination))
 
-    return jsonify({
-        'name': name,
-        'pic': pic,
-        'main_position': main_position,
-        'players': players_data,
-        'matches': matches_data,
-        'teams': teams_data,
-        'stats': {
-            'totalMatches': total_matches,
-            'winRate': win_rate,
-            'avgKDA': f"{avg_kills}/{avg_deaths}/{avg_assists}",
-            'avgMoney': avg_money,
-            'avgAtkM': avg_atk_m,
-            'avgDefM': avg_def_m,
-            'heroPool': hero_pool,
-            'positions': list(position_counter.keys())
-        },
-        'bio': bio
-    })
+
+@player_bp.route('/api/<string:name>')
+def get_player_matches(name):
+    page, per_page = page_args()
+    query = Player.query.filter_by(name=name)
+    latest = query.order_by(Player.date.desc(), Player.id.desc()).first()
+    if latest is None:
+        return jsonify(error='该玩家未收录'), 404
+    aggregate = db.session.query(
+        func.count(Player.id).label('total'), player_wins(Player.result).label('wins'),
+        player_known_results(Player.result).label('known_results'),
+        func.avg(Player.kills).label('kills'), func.avg(Player.deaths).label('deaths'),
+        func.avg(Player.assists).label('assists'), func.avg(Player.money).label('money'),
+        func.avg(Player.atk_m).label('atk_m'), func.avg(Player.def_m).label('def_m'),
+        func.count(func.distinct(Player.hero)).label('heroes'),
+    ).filter(Player.name == name).one()
+    positions = db.session.query(Player.position, func.count(Player.id).label('count')).filter(
+        Player.name == name, Player.position.isnot(None),
+    ).group_by(Player.position).order_by(func.count(Player.id).desc(), Player.position).all()
+    main_position = positions[0].position if positions else None
+    pagination = query.order_by(Player.date.desc(), Player.id.desc()).paginate(
+        page=page, per_page=per_page, error_out=False,
+    )
+    ids = [player.match_id for player in pagination.items]
+    matches = Match.query.filter(Match.match_id.in_(ids)).order_by(Match.date.desc(), Match.id.desc()).all() if ids else []
+    teams = Team.query.filter(Team.match_id.in_(ids)).order_by(Team.match_id.desc(), Team.team_name).all() if ids else []
+    rate = win_rate(aggregate.wins, aggregate.known_results)
+    averages = [rounded(getattr(aggregate, metric), 1) for metric in ('kills', 'deaths', 'assists')]
+    kda_text = '/'.join(str(value) if value is not None else '—' for value in averages)
+    position_label = POSITION_LABELS.get(canonical_position(main_position), main_position or '未知位置')
+    bio = f'{name} 的主要位置是{position_label}，已收录 {aggregate.total} 场出场记录，使用过 {aggregate.heroes} 个英雄。'
+    return jsonify(name=name, pic=latest.pic, team_name=latest.team_name, main_position=main_position,
+                   players=[player_data(player) for player in pagination.items],
+                   matches=[match_data(match) for match in matches], teams=[team_data(team) for team in teams],
+                   pagination=pagination_data(pagination), total=aggregate.total,
+                   stats={'totalMatches': aggregate.total, 'winRate': rate, 'knownResults': aggregate.known_results,
+                          'avgKDA': kda_text, 'avgMoney': rounded(aggregate.money, 1),
+                          'avgAtkM': rounded(aggregate.atk_m, 1), 'avgDefM': rounded(aggregate.def_m, 1),
+                          'heroPool': aggregate.heroes, 'positions': [row.position for row in positions]}, bio=bio)
+
+
+@player_bp.route('/api/<string:name>/analytics')
+def get_player_analytics(name):
+    data = player_analytics(name)
+    if data is None:
+        return jsonify(error='该玩家未收录'), 404
+    return jsonify(data)

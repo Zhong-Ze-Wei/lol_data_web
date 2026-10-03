@@ -1,13 +1,15 @@
-# 这段代码是 SQLAlchemy 模型定义，在 Flask 中它的作用主要包括 数据库表结构定义 + ORM 映射
-
 from app import db
 
 class Team(db.Model):
     __tablename__ = 'teams'
+    __table_args__ = (
+        db.UniqueConstraint('match_id', 'team_name', name='uq_team_match_name'),
+        db.Index('ix_team_name_date_id', 'team_name', 'date', 'id'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.DateTime, nullable=True)  # 比赛日期
-    team_name = db.Column(db.String(100), nullable=True)  # 队伍名
+    date = db.Column(db.DateTime, nullable=True, index=True)  # 比赛日期
+    team_name = db.Column(db.String(100), nullable=True, index=True)  # 队伍名
     team_flag = db.Column(db.String(100), nullable=True)  # 队伍旗帜
     result = db.Column(db.Integer, nullable=True)  # 获胜情况 0 失败，1 胜利
     game_time = db.Column(db.Integer, nullable=True) # 游戏时间
@@ -31,8 +33,7 @@ class Team(db.Model):
     first10Kill = db.Column(db.Integer, nullable=True)  # 首次十杀
     mvp = db.Column(db.String(100), nullable=True)  # 获胜方MVP
     beiguo = db.Column(db.String(100), nullable=True)  # 失败方背锅
-    #match_id = db.Column(db.Integer, db.ForeignKey('matches.match_id'))  # 定义外键约束
-    match_id = db.Column(db.Integer)
+    match_id = db.Column(db.Integer, db.ForeignKey('matches.match_id'), nullable=False, index=True)
     player_a_id = db.Column(db.String(100),  nullable=True)  # 上单
     player_b_id = db.Column(db.String(100),  nullable=True)  # 打野
     player_c_id = db.Column(db.String(100), nullable=True)  # 中单
