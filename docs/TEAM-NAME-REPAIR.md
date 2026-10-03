@@ -55,3 +55,13 @@
 备份 SHA 为 `77623299179ad77c359d9fe3f1e5eba8fe795dee25004aad1529664bf2222811`。本地证明为 `artifacts/bo-proof-only-isolated-v2-proof.json`、`artifacts/bo-proof-only-production-v2-proof.json`，完整来源配对另存 `artifacts/bo-proof-only-production-v2-sources.json`，逐局事务在 `data/reports/bo-proof-only-v2/`。本次零上游、AI 请求及原件写入；最早冻结记录没有详情历史 SHA 的限制继续保留，不能把本次字节核验宣称为原件从未变化。
 
 52 局缺赛程绑定的只读审计实际核验 1,243 份现存原件，目标 14 个 BO 均没有唯一赛程原行，当前可离线恢复为 0。34 局已有明确赛事 ID（1009、1010、1011、1021），这4个目录仍 queued 且无阶段原件；另18局赛事归属缺失。保留已导入单局，等待后续真实目录提供绑定，不凭名称或日期补造归属；完整范围与 SHA 见本地 `artifacts/audit-missing-schedule-bindings-v2.json`。
+
+## 明确主 BO 的 7,330 局仅补证据
+
+固定旧范围中另有 7,330 局来源队名一致，但尚无持久来源证明。新副本的实际审计、应用、独立原件核验和重复应用均通过；香港时间 2026-10-04 07:26:21，正式库同范围 applied 7,330、blocked/failed 0。八表 467,957 条记录身份、schema 和 12,707,040 个受保护字段保持一致；唯一变化为这 7,330 行 `matches.team_name_provenance`，所有名称、数值、选手与来源/采集任务均未改变。
+
+正式执行沿用真实采集锁，在同锁内完成当前计划只读预检、完整备份、逐局事务、修复后在线快照和独立原件核验；锁外只比较冻结数据库。独立来源核验 7,330 局、695 份绑定赛程版本，全部主 `max_mvp.match_id` 明确，备用块同 BO，双方 ID、胜方、实际字节 SHA 和唯一赛程原行一致，没有调用选择政策作为答案。释放锁后主库只读复查全部 noop；副本重复实际应用也全为 noop，数据库物理 SHA 不变且无新备份。
+
+完整备份 SHA 为 `816e98390af89697c9390c122024dc08d36d606fcf384ede43372c24a4102282`。本地证明为 `artifacts/primary-proof-only-isolated-v2-proof.json`、`artifacts/primary-proof-only-production-v2-proof.json`，来源配对另存 `artifacts/primary-proof-only-production-v2-sources.json`。本次零上游、AI 请求及原件写入；最早记录缺详情历史 SHA，证明只绑定本次实际读取的字节，不能宣称来源历来未变。采集执行器会话与进程保留，解除锁后恢复第52批。
+
+原固定 NULL 证据范围共 18,138 局，其中 18,066 局现已通过上述有限修复或补证据，仍有 72 局保留未确认：5 局明确双方或胜方冲突、另12局双方 ID 集合不一致、3局两块均缺 BO、52局缺赛程绑定。各集合实际互斥且并集覆盖剩余范围；最早另行修复的20局 QG 记录在该范围之外。12局新审计中BO和胜方均有效，但详情和赛程双方集合不同，不按同BO或单边ID猜另一队；证据为 `artifacts/audit-twelve-identity-conflicts-v2.json` 与 `artifacts/original-name-scope-resolution-v2.json`。这不是全库来源身份核验完成，也不表示全历史已经补齐。
