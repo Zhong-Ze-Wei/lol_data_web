@@ -402,6 +402,47 @@ def test_ambiguous_entity_is_not_silently_selected():
     assert clarification["choices"][0]["prompt"] in {"T1 Main胜率", "T1 Academy胜率"}
 
 
+@pytest.mark.parametrize("name", ["Cola", "COLA"])
+def test_exact_player_name_resolves_case_variants_without_merging(name):
+    catalog = {"player": ["COLA", "Cola", "TrAce"], "team": [], "hero": [], "tournament": []}
+    value, clarification = resolve_entities(plan(filters={"player": [name]}), catalog, f"{name}出场数")
+    assert clarification is None
+    assert value["filters"]["player"] == [name]
+
+
+def test_normalized_case_variant_remains_ambiguous_until_exact_name_is_chosen():
+    catalog = {"player": ["COLA", "Cola", "TrAce"], "team": [], "hero": [], "tournament": []}
+    _, clarification = resolve_entities(plan(filters={"player": ["cola"]}), catalog, "cola出场数")
+    assert {choice["label"] for choice in clarification["choices"]} == {"COLA", "Cola"}
+    for choice in clarification["choices"]:
+        value, repeated = resolve_entities(plan(filters={"player": [choice["label"]]}), catalog, choice["prompt"])
+        assert repeated is None
+        assert value["filters"]["player"] == [choice["label"]]
+
+
+def test_selecting_exact_clarification_choice_ends_the_case_variant_loop(client, ai, db):
+    for match_id, name, attack in [(70, "COLA", 99999), (71, "Cola", 18010)]:
+        db.session.add(Match(match_id=match_id, game_time=1801, verified=True))
+        db.session.add(Player(match_id=match_id, name=name, team_name="A", position="c", atk=attack))
+    db.session.commit()
+    ai.side_effect = [
+        json.dumps(plan(filters={"player": ["cola"]}, metrics=["damage_per_min"], order_by="damage_per_min")),
+        json.dumps(plan(filters={"player": ["Cola"]}, metrics=["damage_per_min"], order_by="damage_per_min")),
+        "Cola 的分均伤害为600，未合并COLA。",
+    ]
+    first = client.post("/api/ai/query", json={"prompt": "cola分均伤害"})
+    assert first.json["result"]["status"] == "needs_clarification"
+    choice = next(item for item in first.json["result"]["clarification"]["choices"] if item["label"] == "Cola")
+    second = client.post("/api/ai/query", json={"prompt": choice["prompt"]})
+    assert second.status_code == 200
+    assert second.json["result"]["status"] == "ok"
+    assert second.json["result"]["data"][0]["player"] == "Cola"
+    assert second.json["result"]["data"][0]["damage_per_min"] == pytest.approx(600)
+    assert second.json["result"]["data"][0]["sample_size"] == 1
+    assert second.json["result"]["context"]["plan"]["filters"]["player"] == ["Cola"]
+    assert ai.call_count == 3
+
+
 def test_nonexistent_entity_requires_clarification(sample_data):
     _, clarification = resolve_entities(plan(filters={"player": ["NoSuchPerson"]}), entity_catalog(), "NoSuchPerson胜率")
     assert clarification is not None

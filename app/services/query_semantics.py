@@ -272,6 +272,8 @@ def entity_catalog():
 
 def matching_entities(term, kind, catalog):
     names = catalog[kind]
+    if term in names:
+        return [term]
     normalized = normalize_name(term)
     exact = [name for name in names if normalize_name(name) == normalized]
     if exact:
