@@ -4,6 +4,7 @@ from sqlalchemy import case, func
 from app import db
 from app.models import Match, Player, Team
 from app.routes.common import integer_arg, match_data
+from app.services.overview import overview_stats
 from . import main_bp
 
 
@@ -25,16 +26,7 @@ def recent_matches():
 
 @main_bp.route('/stats')
 def stats():
-    counts = db.session.query(
-        func.count(Match.id),
-        func.sum(case((Match.verified.is_(True), 1), else_=0)),
-    ).one()
-    return jsonify(stats={
-        'matches': counts[0],
-        'verified_matches': counts[1] or 0,
-        'players': db.session.query(func.count(func.distinct(Player.name))).scalar(),
-        'teams': db.session.query(func.count(func.distinct(Team.team_name))).scalar(),
-    }, status='success')
+    return jsonify(stats=overview_stats(), status='success')
 
 
 @main_bp.route('/top-players')
