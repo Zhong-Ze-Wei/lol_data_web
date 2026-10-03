@@ -7,10 +7,11 @@ from sqlalchemy import text
 
 from app.models.match import Match
 from app.models.player import Player
+from app.models.sync import HistorySeries, HistoryStage, HistoryTournament
 from app.models.team import Team
 from app.services import ai_assistant
 from app.services.ai_assistant import AIUnavailable, execute_readonly_batch, validate_sql
-from app.services.query_compiler import compile_plan
+from app.services.query_compiler import compile_plan, result_columns
 from app.services.query_semantics import METRICS, InvalidPlan, UnsafePlan, entity_catalog, parse_plan, resolve_entities, validate_plan
 from app.services.stat_metrics import per_minute_number
 
@@ -70,6 +71,120 @@ def ai(app, monkeypatch):
     reply = Mock()
     monkeypatch.setattr(ai_assistant, "model_reply", reply)
     return reply
+
+
+@pytest.fixture
+def conflicting_team_labels(db):
+    # 436为真实冲突的最小投影；另加一条人工legacy记录验证标签与来源边界。
+    schedule = {"matchID": "197", "teamID_a": "28", "teamID_b": "27",
+                "team_short_name_a": "QG", "team_short_name_b": "Snake"}
+    db.session.add(HistoryTournament(tournament_id=3, name="2016 LPL春季赛"))
+    db.session.flush()
+    db.session.add(HistoryStage(id=1, tournament_id=3, cache_key="26", parent_round_id=1))
+    db.session.flush()
+    db.session.add(HistorySeries(series_id=197, tournament_id=3, stage_id=1,
+                                 scheduled_at=datetime(2016, 1, 31, 17),
+                                 source_json=json.dumps(schedule)))
+    for match_id, team_name, source, verified, kills, mvp in [
+        (436, "JDG", "scoregg", True, 6, 1), (437, "QG", "legacy", False, 0, 0),
+    ]:
+        db.session.add(Match(match_id=match_id, series_id=197 if verified else None,
+                             source=source, verified=verified, tournament_name="2016 LPL春季赛",
+                             date=datetime(2016, 1, 31, 17) if verified else None,
+                             date_source="schedule" if verified else "unknown",
+                             red_team_name=team_name, blue_team_name="Snake", win_team_name=team_name))
+        db.session.add(Team(match_id=match_id, team_name=team_name, result=1))
+        db.session.add(Team(match_id=match_id, team_name="Snake", result=0))
+        db.session.add(Player(match_id=match_id, name="Uzi", team_name=team_name,
+                              position="d", kills=kills, mvp=mvp, result="1"))
+    db.session.commit()
+    return schedule
+
+
+def test_team_source_label_disclosure_preserves_verified_scope_and_source_record(client, ai, db, conflicting_team_labels):
+    value = plan(dimensions=["player", "team"], metrics=["total_kills", "max_kills", "mvp_count"],
+                 filters={"player": ["Uzi"], "team": ["JDG"], "verified_only": True,
+                          "date_start": "2016-01-01", "date_end": "2016-12-31"}, order_by="total_kills")
+    ai.side_effect = [json.dumps(value), "来源战队JDG标签下有1次出场，不代表已核实当年正式队名。"]
+    response = client.post("/api/ai/query", json={"prompt": "2016年已核验Uzi来源战队JDG的击杀和MVP数据"})
+    assert response.status_code == 200 and ai.call_count == 2
+    result = response.json["result"]
+    assert result["context"]["plan"] == value
+    assert [(row["player"], row["team"], row["total_kills"], row["max_kills"], row["mvp_count"])
+            for row in result["data"]] == [("Uzi", "JDG", 6, 6, 1)]
+    assert result["evidence"]["verified_matches"] == 1 and result["evidence"]["unverified_matches"] == 0
+    team_column = next(column for column in result["columns"] if column["key"] == "team")
+    assert team_column["label"] == "来源战队"
+    assert "历史赛程名称不同" in team_column["definition"] and "正式队名" in team_column["definition"]
+    assert any("不自动合并" in item and "历史导入" in item for item in result["assumptions"])
+    planning_prompt = ai.call_args_list[0].args[0]
+    explanation_prompt = ai.call_args_list[1].args[0]
+    for prompt in (planning_prompt, explanation_prompt):
+        assert "来源" in prompt and "正式队名" in prompt and "官方转会或更名" in prompt
+    explanation_input = json.loads(ai.call_args_list[1].args[1])
+    assert explanation_input["columns"] == result["columns"]
+    assert explanation_input["rows"] == result["data"]
+    assert Match.query.filter_by(match_id=436).one().red_team_name == "JDG"
+    assert Player.query.filter_by(match_id=436).one().team_name == "JDG"
+    assert json.loads(db.session.get(HistorySeries, 197).source_json) == conflicting_team_labels
+
+
+def test_legacy_labels_remain_separate_and_fallback_does_not_claim_official_team(client, ai, conflicting_team_labels):
+    value = plan(dimensions=["player", "team"], metrics=["games"], filters={"player": ["Uzi"]})
+    ai.side_effect = [json.dumps(value), AIUnavailable("fixture explanation unavailable")]
+    response = client.post("/api/ai/query", json={"prompt": "Uzi按来源战队分组的历史出场"})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert {row["team"]: row["games"] for row in result["data"]} == {"JDG": 1, "QG": 1}
+    assert result["evidence"]["unverified_matches"] == 1
+    assert "来源战队 JDG" in result["answer"]
+    assert any("历史导入" in item and "不代表已核实" in item for item in result["assumptions"])
+    assert not any("比赛当局所属" in item or "详情" in item for item in result["assumptions"])
+
+
+def test_team_source_disclosure_does_not_expand_exact_entity_filter(client, ai, conflicting_team_labels):
+    value = plan(dimensions=["team"], metrics=["games"], filters={"player": ["Uzi"], "team": ["QG"]})
+    ai.side_effect = [json.dumps(value), "来源战队QG标签下有1次历史导入出场。"]
+    response = client.post("/api/ai/query", json={"prompt": "Uzi在QG来源标签下的出场"})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["context"]["plan"]["filters"]["team"] == ["QG"]
+    assert [(row["team"], row["games"]) for row in result["data"]] == [("QG", 1)]
+    assert result["evidence"]["unverified_matches"] == 1
+
+
+def test_verified_historical_team_name_query_does_not_guess_a_source_label_mapping(client, ai, conflicting_team_labels):
+    value = plan(dimensions=["team"], metrics=["games"],
+                 filters={"player": ["Uzi"], "team": ["QG"], "verified_only": True,
+                          "date_start": "2016-01-01", "date_end": "2016-12-31"})
+    ai.return_value = json.dumps(value)
+    response = client.post("/api/ai/query", json={"prompt": "只看2016年已核验Uzi在QG的出场"})
+    assert response.status_code == 200 and ai.call_count == 1
+    result = response.json["result"]
+    assert result["status"] == "empty" and result["data"] == []
+    assert result["context"]["plan"] == value
+    assert "不代表现实中没有" in result["answer"]
+    assert any("正式队名" in item and "不自动合并" in item for item in result["assumptions"])
+
+
+@pytest.mark.parametrize("subject,dimensions", [
+    ("player", ["team", "opponent"]), ("team", ["team", "opponent"]), ("match", ["winner"]),
+])
+def test_all_team_related_dimension_definitions_expose_source_label_boundary(subject, dimensions):
+    columns = result_columns(plan(subject=subject, dimensions=dimensions))
+    for column in columns[:len(dimensions)]:
+        assert "来源战队" in column["label"]
+        assert "历史导入" in column["definition"] and "历史赛程" in column["definition"]
+        assert "不代表已核实" in column["definition"] and "不自动合并" in column["definition"]
+
+
+def test_ai_catalog_discloses_source_labels_without_changing_entity_dimensions(client):
+    response = client.get("/api/ai/catalog")
+    catalog = response.json["result"]
+    assert response.status_code == 200
+    assert catalog["subjects"]["player"]["dimensions"]["team"] == "来源战队"
+    assert catalog["subjects"]["match"]["dimensions"]["winner"] == "获胜来源战队"
+    assert any("历史导入" in rule and "历史赛程名称不同" in rule for rule in catalog["rules"])
 
 
 def test_fact_grain_does_not_multiply_player_rows_by_team_rows(sample_data):
