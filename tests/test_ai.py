@@ -112,9 +112,25 @@ def test_ai_sends_openai_compatible_request(ai_config, provider_post):
             "stream": False,
             "max_tokens": 2048,
             "enable_thinking": False,
+            "thinking": {"type": "disabled"},
         },
         timeout=45,
     )
+
+
+@pytest.mark.parametrize("model, native_thinking", [
+    ("DeepSeek-V4.1-Flash", True), ("deepseek-flash", True), ("other-compatible-model", False),
+])
+def test_native_nonthinking_parameter_is_scoped_to_deepseek(ai_config, provider_post, model, native_thinking):
+    ai_config.config["AI_MODEL"] = model
+    provider_post.return_value = completion("简短解读")
+    assert model_reply("只解释已有结果", "说明样本") == "简短解读"
+    payload = provider_post.call_args.kwargs["json"]
+    assert payload["model"] == model
+    assert payload["max_tokens"] == 2048
+    assert ("thinking" in payload) is native_thinking
+    if native_thinking:
+        assert payload["thinking"] == {"type": "disabled"}
 
 
 @pytest.mark.parametrize("status, message", [
