@@ -31,7 +31,6 @@ function page(value) {
 <template>
   <RouterLink class="back-link" to="/team">← 战队档案</RouterLink>
   <header class="page-heading">
-    <p class="eyebrow">TEAM PROFILE / ARCHIVE</p>
     <h1>{{ name }}</h1>
     <p>战绩与阵容以已收录比赛为依据。</p>
   </header>
@@ -57,14 +56,13 @@ function page(value) {
               path: '/analytics',
               query: { tab: 'teams', team_names: name },
             }"
-            >加入战队比较 ↗</RouterLink
+            >比较战队</RouterLink
           >
         </div>
       </div>
       <section class="panel">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">LATEST RECORDED LINEUP</p>
             <h2>最近收录阵容</h2>
           </div>
           <span class="tag">历史记录</span>
@@ -76,7 +74,7 @@ function page(value) {
             :to="detailLink('player', player.player_name)"
             ><span class="eyebrow">{{ position(player.position) }}</span
             ><strong>{{ player.player_name }}</strong
-            ><span class="row-arrow">↗</span></RouterLink
+            ><span class="detail-button">查看选手</span></RouterLink
           >
           <p v-if="!resource.data.value.players.length" class="muted">
             暂无阵容记录。
@@ -86,13 +84,12 @@ function page(value) {
       <section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">RECENT MATCHES</p>
             <h2>最近比赛记录</h2>
           </div>
           <RouterLink
             class="text-link"
             :to="{ path: '/match', query: { team_name1: name } }"
-            >筛选全部比赛 →</RouterLink
+            >查看全部比赛</RouterLink
           >
         </header>
         <ResourceState :empty="!resource.data.value.matches?.length"
@@ -125,10 +122,10 @@ function page(value) {
                   <td class="numeric">{{ duration(match.game_time) }}</td>
                   <td>
                     <RouterLink
-                      class="row-arrow"
+                      class="detail-button"
                       :to="detailLink('match', match.match_id)"
                       :aria-label="`查看比赛 ${match.match_id}`"
-                      >↗</RouterLink
+                      >查看详情</RouterLink
                     >
                   </td>
                 </tr>

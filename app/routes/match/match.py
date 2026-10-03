@@ -15,6 +15,8 @@ def get_matches():
     else:
         start, end = date_bounds('start_date', 'end_date')
     query = filter_dates(Match.query, Match.date, start, end)
+    if start or end:
+        query = query.filter(Match.date_source == 'schedule')
     for key in ('team_name1', 'team_name2'):
         name = request.args.get(key, '').strip()
         if name:

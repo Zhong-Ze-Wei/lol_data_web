@@ -67,9 +67,6 @@ function page(value) {
 <template>
   <RouterLink class="back-link" to="/player">← 选手档案</RouterLink>
   <header class="page-heading">
-    <p class="eyebrow">
-      PLAYER PROFILE / {{ position(resource.data.value?.main_position) }}
-    </p>
     <h1>{{ name }}</h1>
     <p>已收录比赛中的出场表现与英雄使用情况。</p>
   </header>
@@ -103,7 +100,6 @@ function page(value) {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">POSITION PERCENTILES</p>
               <h2>同位置表现轮廓</h2>
             </div>
           </header>
@@ -130,7 +126,6 @@ function page(value) {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <p class="eyebrow">MONTHLY TREND</p>
               <h2>按月观察</h2>
             </div>
             <label
@@ -160,7 +155,10 @@ function page(value) {
               :label="`${name} 月度${trendLabel}`"
             />
             <p class="chart-note">
-              悬停查看每月原始指标和比赛样本数。历史记录按源数据更新时间分月。
+              {{
+                analytics.data.value?.date_policy ||
+                "月度趋势仅使用已确认赛程，按开赛日期分月。"
+              }}悬停查看原始指标和比赛样本数。
             </p></ResourceState
           >
         </section>
@@ -168,7 +166,6 @@ function page(value) {
       <section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">CHAMPION POOL</p>
             <h2>英雄使用</h2>
           </div>
         </header>
@@ -209,7 +206,6 @@ function page(value) {
       <section class="panel section-space">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">APPEARANCE LOG</p>
             <h2>出场记录</h2>
           </div>
           <span class="tag"
@@ -257,10 +253,10 @@ function page(value) {
                 <td class="numeric">{{ number(record.money) }}</td>
                 <td>
                   <RouterLink
-                    class="row-arrow"
+                    class="detail-button"
                     :to="detailLink('match', record.match_id)"
                     :aria-label="`查看比赛 ${record.match_id}`"
-                    >↗</RouterLink
+                    >查看详情</RouterLink
                   >
                 </td>
               </tr>

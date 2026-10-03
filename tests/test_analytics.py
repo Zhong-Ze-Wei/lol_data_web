@@ -8,7 +8,7 @@ from app.models import Match, Player, Team
 def seed_cohort(db):
     for match_id in range(1, 6):
         date = datetime(2024, 1 if match_id <= 3 else 2, match_id)
-        db.session.add(Match(match_id=match_id, date=date, red_team_name='A', blue_team_name='B',
+        db.session.add(Match(match_id=match_id, date=date, date_source='schedule', red_team_name='A', blue_team_name='B',
                              win_team_name='A' if match_id <= 3 else 'B'))
         db.session.flush()
         db.session.add_all([

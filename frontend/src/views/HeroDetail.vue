@@ -16,7 +16,6 @@ const resource = useResource(
 <template>
   <RouterLink class="back-link" to="/hero">← 英雄数据</RouterLink>
   <header class="page-heading">
-    <p class="eyebrow">CHAMPION PROFILE / SAMPLE STATISTICS</p>
     <h1>{{ name }}</h1>
     <p>汇总已收录比赛中这个英雄的实际使用表现。</p>
   </header>
@@ -48,7 +47,6 @@ const resource = useResource(
       <section class="panel">
         <header class="panel-header">
           <div>
-            <p class="eyebrow">PERFORMANCE METRICS</p>
             <h2>原始表现指标</h2>
           </div>
         </header>

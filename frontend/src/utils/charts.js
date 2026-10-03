@@ -1,7 +1,7 @@
 import { number } from "./format.js";
-export const colors = ["#58d4b4", "#e6bd69", "#75a9ff", "#f190a9"];
+export const colors = ["#1677ff", "#ff7d00", "#00a870", "#7b61d1"];
 const textStyle = {
-  color: "#a8bacb",
+  color: "#4e5969",
   fontFamily: "Microsoft YaHei, sans-serif",
 };
 
@@ -11,6 +11,9 @@ export function radarOption(axes, players) {
     animation: false,
     legend: { bottom: 0, textStyle },
     tooltip: {
+      backgroundColor: "#ffffff",
+      borderColor: "#dce2ea",
+      textStyle: { color: "#1d2129" },
       renderMode: "richText",
       formatter: (item) => {
         const player = players[item.dataIndex];
@@ -23,9 +26,9 @@ export function radarOption(axes, players) {
       indicator: axes.map((axis) => ({ name: axis.label, max: 100 })),
       axisName: textStyle,
       splitNumber: 4,
-      splitArea: { areaStyle: { color: ["#0d1b27", "#132331"] } },
-      splitLine: { lineStyle: { color: "#283b4c" } },
-      axisLine: { lineStyle: { color: "#283b4c" } },
+      splitArea: { areaStyle: { color: ["#ffffff", "#f7f9fc"] } },
+      splitLine: { lineStyle: { color: "#dbe2eb" } },
+      axisLine: { lineStyle: { color: "#dbe2eb" } },
     },
     series: [
       {
@@ -47,6 +50,9 @@ export function trendOption(monthly, metric = "kda", label = "KDA") {
     color: colors,
     animation: false,
     tooltip: {
+      backgroundColor: "#ffffff",
+      borderColor: "#dce2ea",
+      textStyle: { color: "#1d2129" },
       trigger: "axis",
       renderMode: "richText",
       formatter: (items) => {
@@ -59,12 +65,12 @@ export function trendOption(monthly, metric = "kda", label = "KDA") {
       type: "category",
       data: monthly.map((item) => item.month),
       axisLabel: textStyle,
-      axisLine: { lineStyle: { color: "#2a3a4b" } },
+      axisLine: { lineStyle: { color: "#d4d9e1" } },
     },
     yAxis: {
       type: "value",
       axisLabel: textStyle,
-      splitLine: { lineStyle: { color: "#1d2e3e" } },
+      splitLine: { lineStyle: { color: "#edf0f4" } },
     },
     series: [
       {

@@ -6,4 +6,3 @@ python-dotenv>=1.1,<2
 requests>=2.32,<3
 waitress>=3,<4
 sqlglot>=26,<30
-dashscope>=1.24,<2

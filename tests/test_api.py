@@ -143,8 +143,8 @@ def test_latest_team_lineup_is_scoped_to_latest_match_and_team(client, db):
 
 
 def test_end_month_includes_last_day_without_including_next_month(client, db):
-    add_match(db, 1, date=datetime(2024, 2, 29, 23, 59, 59))
-    add_match(db, 2, date=datetime(2024, 3, 1))
+    add_match(db, 1, date=datetime(2024, 2, 29, 23, 59, 59), date_source='schedule')
+    add_match(db, 2, date=datetime(2024, 3, 1), date_source='schedule')
     db.session.commit()
     data = client.get('/match/api/list?start_date=2024-02&end_date=2024-02').json
     assert [match['match_id'] for match in data['matches']] == [1]
