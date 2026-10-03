@@ -5,6 +5,7 @@ import HistoryProgress from "../src/components/HistoryProgress.vue";
 let app;
 afterEach(() => {
   app?.unmount();
+  app = null;
   document.body.innerHTML = "";
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -21,6 +22,7 @@ async function showProgress(worker, fetch) {
       results: { verified: 2 },
     },
     worker: {
+      heartbeat_state: "fresh",
       heartbeat_age_seconds: 0,
       heartbeat_timeout_seconds: 90,
       ...worker,
@@ -104,6 +106,7 @@ describe("历史后台运行展示", () => {
       worker: {
         status: "running",
         alive: true,
+        heartbeat_state: "fresh",
         current_batch: 1,
         heartbeat_age_seconds: 80,
         heartbeat_timeout_seconds: 90,
@@ -120,5 +123,153 @@ describe("历史后台运行展示", () => {
     app.unmount();
     app = null;
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    [20000, 80],
+    [120000, 0],
+  ])(
+    "已生成的fresh响应延迟%s毫秒送达时计入请求耗时，不重获有效期",
+    async (delay, age) => {
+      let deliverResponse;
+      const fetch = vi.fn(
+        () => new Promise((resolve) => (deliverResponse = resolve)),
+      );
+      const progress = await showProgress(
+        { status: "running", alive: true, heartbeat_age_seconds: age },
+        fetch,
+      );
+      await vi.advanceTimersByTimeAsync(delay);
+      deliverResponse(new Response(JSON.stringify(progress), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.querySelector(".history-state.active")).toBeNull();
+      expect(document.body.textContent).not.toContain("正在补采");
+      expect(document.body.textContent).toContain("运行状态待确认");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("刷新超过30秒仍挂起时不并发或取消请求，也不延长缓存心跳", async () => {
+    let pendingSignal;
+    let progress;
+    const fetch = vi
+      .fn()
+      .mockImplementationOnce(
+        async () => new Response(JSON.stringify(progress), { status: 200 }),
+      )
+      .mockImplementationOnce((url, options) => {
+        pendingSignal = options.signal;
+        return new Promise(() => {});
+      });
+    progress = {
+      has_runnable_work: true,
+      worker: {
+        status: "running",
+        alive: true,
+        heartbeat_state: "fresh",
+        heartbeat_age_seconds: 0,
+        heartbeat_timeout_seconds: 90,
+      },
+    };
+    await showProgress({}, fetch);
+    await vi.advanceTimersByTimeAsync(105000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(pendingSignal.aborted).toBe(false);
+    expect(document.querySelector(".history-state.active")).toBeNull();
+    expect(document.body.textContent).toContain("运行状态待确认");
+    expect(document.body.textContent).not.toContain("正在补采");
+    expect(fetch.mock.calls.every(([url]) => url === "/api/sync/history")).toBe(
+      true,
+    );
+    app.unmount();
+    app = null;
+    expect(pendingSignal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("失败后下一请求挂起仍显示不可用，保留覆盖统计直到成功恢复", async () => {
+    let deliverRefresh;
+    let progress;
+    const fetch = vi
+      .fn()
+      .mockImplementationOnce(
+        async () => new Response(JSON.stringify(progress), { status: 200 }),
+      )
+      .mockRejectedValueOnce(new Error("进度连接中断"))
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (deliverRefresh = resolve)),
+      );
+    progress = {
+      has_runnable_work: true,
+      counts: { catalog: { total: 3 }, series: { total: 5 } },
+      worker: {
+        status: "running",
+        alive: true,
+        heartbeat_state: "fresh",
+        heartbeat_age_seconds: 0,
+        heartbeat_timeout_seconds: 90,
+        current_batch: 38,
+      },
+    };
+    await showProgress({}, fetch);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(document.querySelector(".history-state").textContent).toBe(
+      "历史补采进度暂不可用",
+    );
+    expect(document.querySelector(".history-state.active")).toBeNull();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(document.querySelector(".history-state").textContent).toBe(
+      "历史补采进度暂不可用",
+    );
+    expect(document.querySelector(".history-state.active")).toBeNull();
+    expect(document.body.textContent).not.toContain("正在补采");
+    expect(document.body.textContent).not.toContain("后台最近心跳正常");
+    expect(document.body.textContent).not.toContain("当前第 38 批");
+    expect(document.querySelector(".history-metrics dd").textContent).toContain(
+      "3",
+    );
+    deliverRefresh(
+      new Response(
+        JSON.stringify({
+          ...progress,
+          counts: { catalog: { total: 4 }, series: { total: 6 } },
+        }),
+        { status: 200 },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.querySelector(".history-state.active").textContent).toBe(
+      "正在补采",
+    );
+    expect(document.body.textContent).toContain("后台最近心跳正常");
+    expect(document.body.textContent).toContain("当前第 38 批");
+    expect(document.querySelector(".history-metrics dd").textContent).toContain(
+      "4",
+    );
+    expect(document.body.textContent).not.toContain("历史补采进度暂不可用");
+  });
+
+  it("卸载取消挂起请求并清理计时器，之后送达的响应不恢复面板", async () => {
+    let signal;
+    let deliverResponse;
+    const fetch = vi.fn((url, options) => {
+      signal = options.signal;
+      return new Promise((resolve) => (deliverResponse = resolve));
+    });
+    const progress = await showProgress(
+      { status: "running", alive: true },
+      fetch,
+    );
+    app.unmount();
+    app = null;
+    expect(signal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    deliverResponse(new Response(JSON.stringify(progress), { status: 200 }));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(document.querySelector(".history-panel")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
