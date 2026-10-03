@@ -21,14 +21,20 @@ AXES = [
     {'key': 'adc_m', 'label': '分均补刀', 'unit': '刀/分钟'},
 ]
 
+DATE_POLICY = '时间筛选和月趋势仅使用已确认赛程日期；来源更新时间与未知日期不参与时间分析。'
+
 
 def _filters(position, minimum):
     return {'position': position, 'min_matches': minimum,
-            'date_from': request.args.get('date_from'), 'date_to': request.args.get('date_to')}
+            'date_from': request.args.get('date_from'), 'date_to': request.args.get('date_to'),
+            'date_policy': DATE_POLICY}
 
 
 def _player_query(start, end, position=None):
-    query = filter_dates(Player.query, Player.date, start, end).filter(Player.name.isnot(None), Player.name != '')
+    query = filter_dates(Player.query.join(Match, Player.match_id == Match.match_id),
+                         Match.date, start, end).filter(Player.name.isnot(None), Player.name != '')
+    if start or end:
+        query = query.filter(Match.date_source == 'schedule')
     if position:
         query = query.filter(position_filter(Player.position, position) if position in POSITION_ALIASES else Player.position == position)
     return query
@@ -125,8 +131,8 @@ def players_analytics():
 
 
 def _monthly(query):
-    year, month = extract('year', Player.date), extract('month', Player.date)
-    rows = query.filter(Player.date.isnot(None)).with_entities(
+    year, month = extract('year', Match.date), extract('month', Match.date)
+    rows = query.filter(Match.date_source == 'schedule', Match.date.isnot(None)).with_entities(
         year.label('year'), month.label('month'), func.count(Player.id).label('matches_count'),
         player_wins(Player.result).label('wins'), player_known_results(Player.result).label('known'),
         *[func.avg(getattr(Player, axis['key'])).label(axis['key']) for axis in AXES],
@@ -182,7 +188,10 @@ def teams_analytics():
     known = func.sum(case((Team.result.in_((0, 1)), 1), else_=0))
     fields = {'avg_kills': 'kill', 'avg_deaths': 'death', 'avg_assists': 'assist',
               'avg_money': 'money', 'avg_tower': 'tower', 'avg_game_time': 'game_time'}
-    query = filter_dates(Team.query, Team.date, start, end).filter(Team.team_name.isnot(None), Team.team_name != '')
+    query = filter_dates(Team.query.join(Match, Team.match_id == Match.match_id),
+                         Match.date, start, end).filter(Team.team_name.isnot(None), Team.team_name != '')
+    if start or end:
+        query = query.filter(Match.date_source == 'schedule')
     if names:
         query = query.filter(Team.team_name.in_(names))
     rows = query.with_entities(Team.team_name, count.label('matches_count'), wins.label('wins'), known.label('known'),
@@ -195,7 +204,10 @@ def teams_analytics():
     pairs = list(combinations(sorted(row.team_name for row in rows), 2))
     head_to_head = []
     if pairs:
-        matches = filter_dates(Match.query, Match.date, start, end).filter(
+        match_query = filter_dates(Match.query, Match.date, start, end)
+        if start or end:
+            match_query = match_query.filter(Match.date_source == 'schedule')
+        matches = match_query.filter(
             Match.red_team_name.in_([row.team_name for row in rows]),
             Match.blue_team_name.in_([row.team_name for row in rows]),
         ).with_entities(Match.red_team_name, Match.blue_team_name, Match.win_team_name,
@@ -213,4 +225,4 @@ def teams_analytics():
                                      'unknown_results': total - a_wins - b_wins})
     return {'teams': teams, 'head_to_head': head_to_head,
             'filters': {'team_names': names, 'date_from': request.args.get('date_from'),
-                        'date_to': request.args.get('date_to')}}
+                        'date_to': request.args.get('date_to'), 'date_policy': DATE_POLICY}}

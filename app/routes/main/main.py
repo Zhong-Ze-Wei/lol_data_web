@@ -9,7 +9,9 @@ from . import main_bp
 
 @main_bp.route('/recent-matches')
 def recent_matches():
-    recent = Match.query.order_by(Match.date.desc(), Match.id.desc()).limit(10).all()
+    recent = Match.query.filter(Match.date_source == 'schedule', Match.date.isnot(None)).order_by(
+        Match.date.desc(), Match.id.desc(),
+    ).limit(10).all()
     matches = []
     for match in recent:
         item = match_data(match)

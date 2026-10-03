@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify
-from sqlalchemy import func
+from sqlalchemy import case, func
 
 from app import db
 from app.models.match import Match
@@ -15,7 +15,14 @@ sync_bp = Blueprint("sync", __name__, url_prefix="/api/sync")
 def sync_status():
     last_run = db.session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
     tasks = dict(db.session.query(SyncTask.status, func.count()).group_by(SyncTask.status).all())
-    first, last = db.session.query(func.min(Match.date), func.max(Match.date)).one()
+    first, last = db.session.query(func.min(Match.date), func.max(Match.date)).filter(
+        Match.date_source == "schedule",
+    ).one()
+    record_first, record_last = db.session.query(func.min(Match.date), func.max(Match.date)).one()
+    confirmed, unconfirmed = db.session.query(
+        func.sum(case(((Match.date_source == "schedule") & Match.date.isnot(None), 1), else_=0)),
+        func.sum(case(((Match.date_source == "schedule") & Match.date.isnot(None), 0), else_=1)),
+    ).one()
     schedule_file = Path(current_app.config["DATA_DIR"]) / "schedule.json"
     schedule = {
         "enabled": False,
@@ -30,6 +37,10 @@ def sync_status():
         tasks=tasks,
         schedule=schedule,
         data_range={"min_date": first.isoformat() if first else None, "max_date": last.isoformat() if last else None},
+        record_range={"min_date": record_first.isoformat() if record_first else None,
+                      "max_date": record_last.isoformat() if record_last else None},
+        date_quality={"confirmed": confirmed or 0, "unconfirmed": unconfirmed or 0,
+                      "policy": "时间分析仅使用已确认赛程，来源更新时间不代表比赛日期。"},
         verified_matches=db.session.query(func.count(Match.id)).filter(Match.verified.is_(True)).scalar(),
         legacy_matches=db.session.query(func.count(Match.id)).filter(Match.source == "legacy").scalar(),
     )
