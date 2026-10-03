@@ -136,3 +136,13 @@ HTTP200、3.766秒、两次模型调用，无计划修复或重新发送；两�
 这一验证使用明确标为人工对照的数据，没有把其名字或数值当作真实赛事。前后记录为本机 `artifacts/rate-ranking-default-before.json` 与 `artifacts/rate-ranking-default-after.json`，共0次HTTP、0次模型调用、未写生产库、临时数据库已删除。回归另外覆盖一秒占位、明确门槛1/5、指定两实体、月趋势、无分组汇总及真实接口流程中的mock模型漏门槛；独立13项业务测试和60项计划范围核对通过，无P1/P2阻断。
 
 同轮胜负口径审计使用临时库和独立手写SQL：23个组合、1399项检查通过，覆盖未知胜负不计负场/分母、分母0返回NULL、分组和实体/时间/赛事/核验范围。这是SQLite统计与范围的验证，不代表模型意图或MySQL已经验收；证据为本机 `artifacts/ai-winrate-semantic-audit.json`。
+
+## 总量、最高值及MVP的有效样本展示
+
+独立呈现审计发现SQL已有 `total_kills_samples`、`max_kills_samples` 和 `mvp_count_samples`，但表格列元数据遗漏。多维分组没有图表，MVP次数0且有效记录0、1或10条都会只显示0与总出场10，无法区分缺记录和已记录的零。补充三列及MVP样本定义，保留原SQL和计数公式；单维图表原有的样本tooltip继续使用实际样本，不把0回退成总出场数。
+
+独立临时库40条人工出场、四组、两次mock接口及实际前端工具验证，56项手写SQL对照通过；前后完整数据与SQL完全一致，新增表格样本列能显示0/1/10。证据为本机 `artifacts/ai-count-sample-display-audit.json` 与 `artifacts/ai-count-sample-display-after-audit.json`。真实浏览器1440px和390px仅拦截隔离页面的一次AI接口响应，使用明确标注“人工QA样本，非真实赛事”的fixture，不调用模型；多维表格三列可读，无页面横向溢出、NaN或浏览器错误。手机只在表格内部滚动，记录为 `artifacts/frontend-qa/count-samples-artificial-*`。
+
+另外在真实网站以DeepSeek查询2016年LPL中单、已核验和确认赛程的分均伤害前十：HTTP200，13.114秒、两次模型调用、无计划修复；模型本次明确返回门槛10，不能把它写成实调了遗漏门槛的情形。独立冻结1028条符合条件的来源投影（514个不同单局），90项数值、顺序、样本及来源核对通过。桌面和手机无溢出、NaN或浏览器错误，改变视口没有额外发送AI请求；证据为 `artifacts/ai-rate-ranking-live-benchmark.json`、`artifacts/frontend-qa/rate-ranking-live-*`。
+
+这次接口记录查询8094毫秒。后续限量只读审计两条相同scope的SQL，分别166和150毫秒，未复现完整三条查询批次的延迟；原因仍未知，没有据此增索引或宣称性能问题已解决。具体计划、时间和未验证部分保存在本机 `artifacts/ai-rate-query-performance-audit.json`。
