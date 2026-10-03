@@ -73,6 +73,9 @@ def test_incomplete_or_conflicting_identity_keeps_original_detail_names(named_so
     sources = {'detail_mvp': payload['data']['max_mvp'], 'row': schedule['source_row'],
                'schedule': schedule, 'info': payload['data']['result_list']}
     sources[target][field] = value
+    if target == 'detail_mvp' and field == 'match_id' and value is None:
+        # 真正缺 BO：主备用均无声明；备用明确 BO 的新路径另有回归。
+        payload['data']['max_beiguo']['match_id'] = None
     names, proof = resolve(payload, schedule)
     assert names == {'red': 'LGD', 'blue': 'EDG'}
     assert proof['selected_source'] == 'detail' and proof['status'] == 'unresolved'

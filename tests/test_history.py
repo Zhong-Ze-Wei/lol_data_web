@@ -23,6 +23,7 @@ from scripts.pipeline import run_pipeline
 def result():
     payload = json.loads((Path(__file__).parent / 'fixtures' / 'scoregg_result_66845.json').read_text(encoding='utf-8'))
     payload['data']['max_mvp']['match_id'] = '20674'
+    payload['data']['max_beiguo']['match_id'] = '20674'
     return payload
 
 
@@ -261,6 +262,7 @@ def test_all_first_small_batch_imports_oldest_tournament_and_next_batch_continue
             payload = super().get_result(rid)
             payload['data']['resultID'] = rid
             payload['data']['max_mvp']['match_id'] = '20674' if rid == 66845 else '8905'
+            payload['data']['max_beiguo']['match_id'] = payload['data']['max_mvp']['match_id']
             return payload
     first = TwoTournaments(result, budget=5)
     report, code = run(first, tmp_path)
