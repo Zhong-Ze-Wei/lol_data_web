@@ -198,6 +198,75 @@ def test_average_ranking_requires_ten_known_metric_samples_not_just_ten_rows(db)
     assert result[0]["avg_kda_samples"] == 10
 
 
+@pytest.fixture
+def rate_ranking_data(db):
+    match_id = 3500
+    for name, appearances, known, total, duration in [
+        ("Flash", 1, 1, 20000, 600), ("Steady", 10, 10, 6000, 600),
+        ("Sparse", 10, 1, 10000, 600), ("Placeholder", 10, 10, 30000, 1),
+    ]:
+        for index in range(appearances):
+            match_id += 1
+            value = total if index < known else None
+            db.session.add(Match(match_id=match_id, game_time=duration,
+                                 date=datetime(2014, 5, 1), date_source="schedule", verified=True))
+            db.session.add(Player(match_id=match_id, name=name, team_name=name, position="c",
+                                  atk=value, def_=value, money=value, hits=value))
+            db.session.add(Team(match_id=match_id, team_name=name, attack=value, money=value))
+    db.session.commit()
+
+
+RATE_RANKING_METRICS = [
+    ("player", "damage_per_min"), ("player", "damage_taken_per_min"),
+    ("player", "gold_per_min"), ("player", "cs_per_min"),
+    ("team", "damage_per_min"), ("team", "gold_per_min"),
+]
+
+
+@pytest.mark.parametrize("subject,metric", RATE_RANKING_METRICS)
+def test_rate_ranking_default_excludes_single_appearance_and_sparse_metric_samples(rate_ranking_data, subject, metric):
+    dimension = "player" if subject == "player" else "team"
+    value = validate_plan({"subject": subject, "dimensions": [dimension], "metrics": [metric],
+                           "order_by": metric, "filters": {"verified_only": True}})
+    result, evidence = rows(value)
+    assert value["min_games"] == 10
+    assert [row[dimension] for row in result] == ["Steady"]
+    assert result[0][metric] == 600 and result[0][f"{metric}_samples"] == 10
+    assert evidence[0]["sample_size"] == 31  # 排名门槛不修改原始范围的来源证据。
+
+
+@pytest.mark.parametrize("subject,metric", RATE_RANKING_METRICS)
+def test_rate_ranking_user_threshold_focused_comparison_and_monthly_trend_keep_their_scope(
+        rate_ranking_data, subject, metric):
+    dimension = "player" if subject == "player" else "team"
+    raw = {"subject": subject, "dimensions": [dimension], "metrics": [metric], "order_by": metric}
+    explicit = validate_plan({**raw, "min_games": 1})
+    result, _ = rows(explicit)
+    assert [row[dimension] for row in result] == ["Flash", "Sparse", "Steady", "Placeholder"]
+    assert validate_plan({**raw, "min_games": 5})["min_games"] == 5
+    focused = validate_plan({**raw, "filters": {dimension: ["Flash", "Sparse"]}})
+    result, _ = rows(focused)
+    assert focused["min_games"] == 1 and [row[dimension] for row in result] == ["Flash", "Sparse"]
+    assert validate_plan({**raw, "dimensions": []})["min_games"] == 1
+    monthly = validate_plan({**raw, "dimensions": ["month"]})
+    result, _ = rows(monthly)
+    assert monthly["min_games"] == 1 and len(result) == 1
+    assert result[0]["month"] == "2014-05" and result[0][f"{metric}_samples"] == 12
+
+
+def test_rate_endpoint_applies_business_default_when_model_omits_minimum(client, ai, rate_ranking_data):
+    ai.side_effect = [json.dumps({"subject": "player", "dimensions": ["player"],
+                                "metrics": ["damage_per_min"], "order_by": "damage_per_min",
+                                "filters": {"verified_only": True}}), "Steady有10个有效分均伤害样本。"]
+    response = client.post("/api/ai/query", json={"prompt": "已核验选手的分均伤害排行"})
+    assert response.status_code == 200 and ai.call_count == 2
+    result = response.json["result"]
+    assert result["context"]["plan"]["min_games"] == 10
+    assert [row["player"] for row in result["data"]] == ["Steady"]
+    assert result["data"][0]["damage_per_min_samples"] == 10
+    assert any("至少10个有效样本" in item for item in result["assumptions"])
+
+
 def test_ascending_average_rank_places_null_last(db, sample_data):
     db.session.add(Match(match_id=99))
     db.session.add(Team(match_id=99, team_name="NULL_ONLY", game_time=None))

@@ -202,7 +202,7 @@ def validate_plan(value):
             raise InvalidPlan("位置只能为上单/打野/中单/下路/辅助或a–e") from error
     focused = (subject == "player" and 1 <= len(filters.get("player", [])) <= 2) or (subject == "team" and 1 <= len(filters.get("team", [])) <= 2)
     temporal = bool(set(dimensions) & {"day", "month", "year"})
-    default_min = 10 if dimensions and not focused and not temporal and any(METRICS[subject][item]["operation"] in {"avg", "win_rate", "aggregate_kda", "binary_rate"} for item in metrics) else 1
+    default_min = 10 if dimensions and not focused and not temporal and any(METRICS[subject][item]["operation"] in {"avg", "win_rate", "aggregate_kda", "binary_rate", "rate_per_min"} for item in metrics) else 1
     numbers = {"min_games": (value.get("min_games", default_min), 1, 10000), "limit": (value.get("limit", 100), 1, 100)}
     for label, (number, lower, upper) in numbers.items():
         if type(number) is not int or not lower <= number <= upper:
