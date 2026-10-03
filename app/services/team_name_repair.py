@@ -77,7 +77,7 @@ def _old_color_mapping(match, data, detail_names, proof):
         known_pair = (set(prior_ids) == {'red', 'blue'}
                       and all(type(value) is int and value > 0 for value in prior_ids.values())
                       and len(set(prior_ids.values())) == 2)
-        if known_pair and (prior.get('series_id') != match['series_id']
+        if known_pair and (prior.get('series_id') is not None and prior['series_id'] != match['series_id']
                            or set(prior_ids.values()) != set(current_ids.values())):
             raise TeamNameRepairError('已有来源证明的 BO/双方 ID 与当前详情冲突')
         if previous.get('selected_source') == 'schedule' and previous.get('status') == 'verified':

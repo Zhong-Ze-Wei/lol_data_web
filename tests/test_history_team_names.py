@@ -355,6 +355,7 @@ def test_unproven_partial_name_candidate_is_not_requeued(db, tmp_path, invalid):
     series, payload, raw, _ = _prepared_result(db, tmp_path, partial=True)
     if invalid == 'missing_bo':
         payload['data']['max_mvp'].pop('match_id')
+        payload['data']['max_beiguo'].pop('match_id')
     elif invalid == 'different_ids':
         payload['data']['result_list']['red_teamID'] = '999'
     elif invalid == 'missing_label':

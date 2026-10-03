@@ -14,7 +14,7 @@ from app.models.player import Player
 from app.models.team import Team
 from app.models.sync import SyncTask, utc_now
 from app.services.source_identity import recover_slot_name, source_player_id
-from app.services.team_names import resolve_team_names
+from app.services.team_names import resolve_bo_identity, resolve_team_names, winner_identity_error
 
 
 class InvalidResult(ValueError):
@@ -223,6 +223,9 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
     info = data.get('result_list')
     if not isinstance(info, dict) or not info:
         raise PendingResult('result_list 尚未生成')
+    bo_identity = resolve_bo_identity(data)
+    if bo_identity['error']:
+        raise InvalidResult(f"详情所属 BO 身份冲突或格式无效：{bo_identity['error']}")
     detail_names = {side: info.get(f'{side}_name') for side in ('red', 'blue')}
     names, team_name_provenance = resolve_team_names(data, schedule, detail_names, prior_team_name_provenance)
     if any(not isinstance(name, str) or not name.strip() for name in names.values()):
@@ -235,6 +238,9 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
         raise PendingResult('双方胜负尚未确定')
     missing = []
     duration = _source_duration(info, allow_incomplete, missing)
+    winner_error = winner_identity_error(info, results)
+    if winner_error:
+        raise InvalidResult(f'详情胜方身份冲突或格式无效：{winner_error}')
     schedule = schedule or {}
     date = schedule.get('scheduled_at')
     date_source = 'schedule' if date else 'unknown'
@@ -248,9 +254,9 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
         date_source = 'updated_at'
     mvp = (data.get('max_mvp') or {}).get('nickname')
     beiguo = (data.get('max_beiguo') or {}).get('nickname')
-    source_series = (data.get('max_mvp') or {}).get('match_id')
-    series_id = schedule.get('series_id') or (int(source_series) if source_series else None)
-    if source_series and schedule.get('series_id') and int(source_series) != int(schedule['series_id']):
+    source_series = bo_identity['series_id']
+    series_id = schedule.get('series_id') or source_series
+    if source_series and schedule.get('series_id') and source_series != int(schedule['series_id']):
         raise InvalidResult('赛程 series_id 与详情所属 BO 系列不一致')
     match = {
         'match_id': result_id, 'series_id': series_id,
