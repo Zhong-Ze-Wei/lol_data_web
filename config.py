@@ -17,10 +17,12 @@ class Config:
     AUTO_CREATE_DB = SQLALCHEMY_DATABASE_URI.startswith("sqlite:")
     HOST = os.getenv("HOST", "127.0.0.1")
     PORT = int(os.getenv("PORT", "5100"))
-    AI_API_KEY = os.getenv("AI_API_KEY") or os.getenv("ALIYUN_APP_KEY")
-    AI_MODEL = os.getenv("AI_MODEL", "qwen-plus")
+    AI_API_KEY = os.getenv("AI_API_KEY")
+    AI_BASE_URL = os.getenv("AI_BASE_URL", "https://aiping.cn/api/v1")
+    AI_MODEL = os.getenv("AI_MODEL", "DeepSeek-V4.1-Flash")
+    AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "2048"))
     AI_MAX_ROWS = 100
-    AI_TIMEOUT = 45
+    AI_TIMEOUT = int(os.getenv("AI_TIMEOUT", "45"))
     SCHEDULE_TIME = os.getenv("SCHEDULE_TIME", "08:00")
     SCHEDULE_TIMEZONE = "Asia/Hong_Kong"
     MAX_CONTENT_LENGTH = 16 * 1024

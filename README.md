@@ -109,7 +109,19 @@ Get-ScheduledTaskInfo -TaskName 'LOL Data Daily Sync'
 
 列表支持 `page/per_page`，单页最多100条；详情统计覆盖全部已收录记录，明细分页。错误返回JSON，空列表为200，参数错误400，缺实体404。
 
-AI可在 `.env` 设置 `AI_API_KEY` 和 `AI_MODEL`。没有密钥时返回明确的未配置状态；不会生成模拟答案，也不会在数据查询失败时改用常识冒充数据库结果。SQL有单语句、只读、表范围、结果条数与SQLite执行时间约束。
+AI通过 OpenAI 兼容接口调用，默认使用 AI Ping 的 `DeepSeek-V4.1-Flash`。在本机 `.env` 设置：
+
+```dotenv
+AI_API_KEY=填写自己的密钥
+AI_BASE_URL=https://aiping.cn/api/v1
+AI_MODEL=DeepSeek-V4.1-Flash
+AI_MAX_TOKENS=2048
+AI_TIMEOUT=45
+```
+
+配置后重启 `npm start`。调用地址为 `AI_BASE_URL/chat/completions`，密钥只在后端使用；`.env` 不提交 Git。接口按 [AI Ping 官方文档](https://aiping.cn/docs/API/text-models) 使用 Bearer 鉴权、非流式请求，并关闭思考输出以减少问答等待。
+
+没有密钥时返回明确的未配置状态；不会生成模拟答案，也不会在数据查询失败时改用常识冒充数据库结果。SQL有单语句、只读、表范围、结果条数与SQLite执行时间约束。鉴权失败、限流、超时、空回复和截断回复均返回中文错误；不会自动重试付费请求。
 
 MySQL可通过 `.env` 的 `DATABASE_URL=mysql+pymysql://...` 显式选择。请使用符合新模型的新库；原版数据库不会自动改表。旧模板、静态图片和迁移文件已保存在本机 `research/legacy/web-old/`，不用于新版本运行。
 

@@ -2,7 +2,7 @@ import json
 import logging
 import time
 
-import dashscope
+import requests
 import sqlglot
 from flask import current_app
 from requests import RequestException
@@ -83,20 +83,38 @@ def execute_readonly(sql, timeout=10):
 
 def model_reply(system, prompt):
     try:
-        response = dashscope.Generation.call(
-            api_key=current_app.config["AI_API_KEY"],
-            model=current_app.config["AI_MODEL"],
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            temperature=0.1,
-            result_format="message",
+        response = requests.post(
+            current_app.config["AI_BASE_URL"].rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {current_app.config['AI_API_KEY']}"},
+            json={
+                "model": current_app.config["AI_MODEL"],
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "stream": False,
+                "max_tokens": current_app.config["AI_MAX_TOKENS"],
+                "enable_thinking": False,
+            },
             timeout=current_app.config["AI_TIMEOUT"],
         )
     except RequestException as error:
         raise AIUnavailable("AI 服务连接超时或暂时不可用，请稍后重试") from error
     if response.status_code != 200:
         logger.warning("AI provider failed with status %s", response.status_code)
+        if response.status_code in (401, 403):
+            raise AIUnavailable("AI 密钥无效或没有模型访问权限，请检查 AI 配置")
+        if response.status_code == 429:
+            raise AIUnavailable("AI 服务请求过于频繁，请稍后重试")
         raise AIUnavailable("AI 服务暂时不可用，请稍后重试")
-    return response.output.choices[0].message.content.strip()
+    try:
+        choice = response.json()["choices"][0]
+        content = choice["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as error:
+        raise AIUnavailable("AI 服务返回了无效结果，请稍后重试") from error
+    if choice.get("finish_reason") == "length":
+        raise AIUnavailable("AI 回复超出长度限制，请缩小问题范围后重试")
+    if not isinstance(content, str) or not content.strip():
+        raise AIUnavailable("AI 服务没有返回有效内容，请稍后重试")
+    return content.strip()
 
 
 def schema_description():
@@ -116,6 +134,7 @@ def run_ai_query(user_prompt, user_name="", request_id=None):
         f"你是英雄联盟赛事数据分析助手。根据用户问题生成单条{dialect} SELECT查询，"
         "只返回SQL，不含代码围栏。只能查询以下表，不能修改任何数据。"
         "players、teams每行是一局出场记录，以match_id关联matches。"
+        "players.position编码为a=上单、b=打野、c=中单、d=下路/ADC、e=辅助，筛选位置使用编码。"
         "result=1表示胜，百分比0-100，game_time单位秒。历史source=legacy数据未核验，"
         "date_source=updated_at仅为来源更新时间；不能将日期推断为赛季、联赛或版本。"
         "按所需字段查询，限制结果100条，避免无条件笛卡尔积。\n" + schema_description()
