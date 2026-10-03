@@ -92,11 +92,11 @@
   padding: 14px 16px;
   background: #fafbfc;
   border-radius: 5px;
-  margin-bottom: 18px;
+  margin-top: 18px;
 }
 .ai-assumptions ul {
   padding-left: 18px;
-  margin: 0;
+  margin: 10px 0 0;
   color: #4e5969;
   font-size: 13px;
   line-height: 1.8;
@@ -125,6 +125,24 @@
 }
 .ai-analysis-panel .ai-answer {
   font-size: 14px;
+}
+.ai-interpretation {
+  padding: 12px 14px;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  margin-top: 14px;
+}
+.ai-interpretation .ai-answer {
+  margin-top: 10px;
+}
+.ai-table-hint {
+  display: none;
+}
+.ai-evidence + .ai-data-section {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
 }
 .ai-chart-section,
 .ai-data-section,
@@ -185,6 +203,10 @@
   font-size: 13px;
 }
 @media (max-width: 760px) {
+  .ai-table-hint {
+    display: block;
+    margin: 0 0 10px;
+  }
   .ai-sample-grid {
     grid-template-columns: repeat(3, 1fr);
   }

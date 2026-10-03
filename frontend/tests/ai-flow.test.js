@@ -21,7 +21,12 @@ describe("AI 追问与澄清操作", () => {
         status: "ok",
         question: "选手KDA",
         answer: "根据数据库完成查询。",
-        data: [],
+        data: [{ player: "选手甲", avg_kda: 4 }],
+        columns: [
+          { key: "player", label: "选手", type: "string" },
+          { key: "avg_kda", label: "平均单局 KDA", type: "number" },
+        ],
+        assumptions: ["只统计已收录的选手出场记录。"],
         context,
         followups: [{ label: "只看今年", prompt: "只看今年" }],
       },
@@ -96,6 +101,8 @@ describe("AI 追问与澄清操作", () => {
     }
     await send("选手KDA");
     expect(calls).toEqual([{ prompt: "选手KDA" }]);
+    expect(document.querySelector(".ai-assumptions").open).toBe(false);
+    expect(document.querySelector(".ai-interpretation").open).toBe(false);
     document.querySelector(".ai-followups button").click();
     await nextTick();
     expect(document.querySelector("#ai-prompt").value).toBe("只看今年");
@@ -104,6 +111,10 @@ describe("AI 追问与澄清操作", () => {
     expect(calls[1]).toEqual({ prompt: "只看今年", context });
     expect(document.querySelector(".ai-status").textContent).toBe(
       "需要补充条件",
+    );
+    expect(document.querySelector(".ai-interpretation")).toBeNull();
+    expect(document.querySelector(".ai-answer").textContent).toContain(
+      "请选择日期口径",
     );
     document.querySelector(".ai-clarification button").click();
     await nextTick();

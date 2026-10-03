@@ -80,29 +80,6 @@ const range = computed(() => evidenceRange(evidence.value));
         >
       </p>
     </div>
-    <div v-if="result.assumptions?.length" class="ai-assumptions">
-      <h3>本次统计口径</h3>
-      <ul>
-        <li v-for="assumption in result.assumptions" :key="assumption">
-          {{ assumption }}
-        </li>
-      </ul>
-    </div>
-    <div v-if="result.answer" class="markdown ai-answer" v-html="answer"></div>
-    <div v-if="chart" class="ai-chart-section">
-      <h3>数据图表</h3>
-      <Chart
-        :option="chart.option"
-        label="本次 AI 查询结果图表"
-        :height="320"
-      />
-      <p class="muted small-text">
-        缺失指标留空。<span v-if="chart.displayed < chart.total"
-          >图表展示前 {{ chart.displayed }} 条，完整
-          {{ chart.total }} 条结果见下表。</span
-        >
-      </p>
-    </div>
     <div v-if="result.data?.length" class="ai-data-section">
       <div class="ai-subheading">
         <h3>查询数据</h3>
@@ -110,6 +87,9 @@ const range = computed(() => evidenceRange(evidence.value));
           >返回 {{ number(result.data.length) }} 条</span
         >
       </div>
+      <p v-if="columns.length > 4" class="ai-table-hint muted small-text">
+        左右滑动查看全部指标与有效样本。
+      </p>
       <DataTable :rows="result.data" :columns="columns" />
       <details
         v-if="columns.some((column) => column.definition)"
@@ -129,6 +109,44 @@ const range = computed(() => evidenceRange(evidence.value));
     <p v-else-if="result.status === 'empty'" class="ai-empty-note">
       当前筛选范围没有匹配记录。可以调整日期、实体名称或最低样本数后再查询。
     </p>
+    <div v-if="chart" class="ai-chart-section">
+      <h3>数据图表</h3>
+      <Chart
+        :option="chart.option"
+        label="本次 AI 查询结果图表"
+        :height="320"
+      />
+      <p class="muted small-text">
+        缺失指标留空。<span v-if="chart.displayed < chart.total"
+          >图表展示前 {{ chart.displayed }} 条，完整
+          {{ chart.total }} 条结果见上表。</span
+        >
+      </p>
+    </div>
+    <details v-if="result.assumptions?.length" class="ai-assumptions">
+      <summary>统计口径 · {{ result.assumptions.length }} 项</summary>
+      <ul>
+        <li v-for="assumption in result.assumptions" :key="assumption">
+          {{ assumption }}
+        </li>
+      </ul>
+    </details>
+    <details
+      v-if="
+        result.answer &&
+        result.data?.length &&
+        !['needs_clarification', 'unsupported'].includes(result.status)
+      "
+      class="ai-interpretation"
+    >
+      <summary>查看 AI 解读</summary>
+      <div class="markdown ai-answer" v-html="answer"></div>
+    </details>
+    <div
+      v-else-if="result.answer"
+      class="markdown ai-answer"
+      v-html="answer"
+    ></div>
     <details v-if="result.sql" class="ai-sql">
       <summary>查看 SQL 与查询证据</summary>
       <p v-if="evidence" class="muted small-text">
