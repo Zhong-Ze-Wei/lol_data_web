@@ -19,6 +19,7 @@ class Match(db.Model):
     red_team_name = db.Column(db.String(100), nullable=True, index=True)
     blue_team_name = db.Column(db.String(100), nullable=True, index=True)
     win_team_name = db.Column(db.String(100), nullable=True)
+    team_name_provenance = db.Column(db.JSON(none_as_null=True), nullable=True)
     mvp = db.Column(db.String(100), nullable=True)
 
     def save(self):

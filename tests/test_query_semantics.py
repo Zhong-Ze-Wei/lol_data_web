@@ -139,7 +139,9 @@ def test_legacy_labels_remain_separate_and_fallback_does_not_claim_official_team
     assert result["evidence"]["unverified_matches"] == 1
     assert "来源战队 JDG" in result["answer"]
     assert any("历史导入" in item and "不代表已核实" in item for item in result["assumptions"])
-    assert not any("比赛当局所属" in item or "详情" in item for item in result["assumptions"])
+    assert not any("比赛当局所属" in item for item in result["assumptions"])
+    assert any("同一BO及双方战队ID完全匹配" in item and "旧记录须单独回放核验" in item
+               for item in result["assumptions"])
 
 
 def test_team_source_disclosure_does_not_expand_exact_entity_filter(client, ai, conflicting_team_labels):
