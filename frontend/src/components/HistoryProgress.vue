@@ -72,9 +72,13 @@ const status = computed(() =>
 );
 const metrics = computed(() => [
   {
-    label: "赛事目录",
-    value: progress.value?.counts?.catalog?.total,
+    label: "目录进度",
+    value: stateCount(progress.value?.counts?.catalog, "discovered"),
+    total: progress.value?.counts?.catalog?.total,
+    fraction: true,
     unit: "项",
+    title:
+      "已读取赛事阶段列表的目录项数 / 来源目录总数，阶段赛程与战报仍需另采",
   },
   {
     label: "系列对阵",
@@ -143,10 +147,17 @@ const fields = [
     </header>
     <template v-if="progress">
       <dl class="history-metrics">
-        <div v-for="metric in metrics" :key="metric.label">
+        <div
+          v-for="metric in metrics"
+          :key="metric.label"
+          :title="metric.title"
+        >
           <dt>{{ metric.label }}</dt>
           <dd>
-            {{ number(metric.value) }}<small>{{ metric.unit }}</small>
+            {{ number(metric.value)
+            }}<template v-if="metric.fraction">
+              / {{ number(metric.total) }}</template
+            ><small>{{ metric.unit }}</small>
           </dd>
         </div>
       </dl>
