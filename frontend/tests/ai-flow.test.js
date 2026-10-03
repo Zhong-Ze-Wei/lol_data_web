@@ -3,7 +3,85 @@ import { createApp, h, nextTick } from "vue";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import Home from "../src/views/Home.vue";
 
+vi.mock("../src/components/Chart.vue", () => ({
+  __esModule: true,
+  default: {
+    props: ["label"],
+    render() {
+      return h("div", { class: "tested-ai-chart" }, this.label);
+    },
+  },
+}));
+
 let app;
+function streamResponse(result) {
+  return new Response(
+    JSON.stringify({
+      type: "data",
+      result: { ...result, explanation_status: "skipped" },
+    }) +
+      "\n" +
+      JSON.stringify({ type: "done" }) +
+      "\n",
+    { headers: { "Content-Type": "application/x-ndjson" } },
+  );
+}
+function controlledResponse() {
+  let controller;
+  const response = new Response(
+    new ReadableStream({
+      start(value) {
+        controller = value;
+      },
+    }),
+    { headers: { "Content-Type": "application/x-ndjson" } },
+  );
+  return {
+    response,
+    send(event) {
+      controller.enqueue(
+        new TextEncoder().encode(JSON.stringify(event) + "\n"),
+      );
+    },
+    close() {
+      controller.close();
+    },
+  };
+}
+function dataResult() {
+  return {
+    status: "ok",
+    question: "2016年已核验选手KDA",
+    answer: "",
+    explanation_status: "pending",
+    data: [{ player: "选手甲", avg_kda: 4 }],
+    columns: [
+      { key: "player", label: "选手", type: "string" },
+      { key: "avg_kda", label: "平均KDA", type: "number" },
+    ],
+    chart: {
+      type: "bar",
+      x: "player",
+      series: [{ key: "avg_kda", label: "平均KDA" }],
+    },
+    evidence: {
+      matches: 20,
+      rows: 20,
+      verified_matches: 20,
+      model_calls: 1,
+      grain: "选手单局出场",
+    },
+    assumptions: ["仅统计已核验出场。"],
+    context: {
+      plan: {
+        entity: "players",
+        metrics: ["avg_kda"],
+        filters: { verified_only: true },
+      },
+    },
+    followups: [{ label: "按英雄拆分", prompt: "保持条件，按英雄拆分" }],
+  };
+}
 const originalScroll = Element.prototype.scrollIntoView;
 afterEach(() => {
   app?.unmount();
@@ -20,7 +98,8 @@ async function mountClarificationFlow(responses) {
       let payload;
       if (path.startsWith("/api/ai/query")) {
         calls.push(JSON.parse(options.body));
-        payload = { result: responses[calls.length - 1] };
+        const result = responses[calls.length - 1];
+        return result instanceof Response ? result : streamResponse(result);
       } else if (path.startsWith("/api/stats"))
         payload = {
           stats: { matches: 0, players: 0, teams: 0, verified_matches: 0 },
@@ -66,6 +145,175 @@ async function sendPrompt(value) {
 }
 
 describe("AI 追问与澄清操作", () => {
+  it("先展示表格、证据和图表；解读等待时可继续填入追问，完成后保留同份数据与条件", async () => {
+    const stream = controlledResponse();
+    const initial = dataResult();
+    const calls = await mountClarificationFlow([
+      stream.response,
+      { status: "empty", data: [], answer: "没有数据", context: null },
+    ]);
+    stream.send({ type: "data", result: initial });
+    await sendPrompt(initial.question);
+    expect(document.querySelector(".ai-data-section").textContent).toContain(
+      "选手甲",
+    );
+    expect(document.querySelector(".ai-evidence").textContent).toContain("20");
+    await vi.waitFor(() =>
+      expect(document.querySelector(".tested-ai-chart")).not.toBeNull(),
+    );
+    expect(document.querySelector(".ai-status").textContent).toBe(
+      "数据已就绪，正在解读",
+    );
+    expect(document.querySelector(".ai-interpretation")).toBeNull();
+    expect(document.querySelector("#ai-prompt").disabled).toBe(false);
+    expect(document.querySelector(".ai-panel .state-box")).toBeNull();
+    document.querySelector(".ai-followups button").click();
+    await nextTick();
+    expect(document.querySelector("#ai-prompt").value).toBe(
+      "保持条件，按英雄拆分",
+    );
+    expect(calls).toHaveLength(1);
+    stream.send({
+      type: "explanation",
+      result: {
+        ...initial,
+        answer: "完整解读内容。",
+        explanation_status: "complete",
+        evidence: {
+          ...initial.evidence,
+          model_calls: 2,
+          timings_ms: { writer: 100 },
+        },
+      },
+    });
+    stream.send({ type: "done" });
+    stream.close();
+    await vi.waitFor(() =>
+      expect(document.querySelector(".ai-status").textContent).toBe("分析完成"),
+    );
+    expect(document.querySelector(".ai-interpretation").textContent).toContain(
+      "完整解读内容",
+    );
+    expect(document.querySelector(".ai-data-section").textContent).toContain(
+      "选手甲",
+    );
+    await sendPrompt();
+    expect(calls[1]).toEqual({
+      prompt: "保持条件，按英雄拆分",
+      context: initial.context,
+    });
+  });
+
+  it("数据之后断流保留表与条件，明确解读未完成且没有自动重试", async () => {
+    const stream = controlledResponse();
+    const initial = dataResult();
+    const calls = await mountClarificationFlow([
+      stream.response,
+      { status: "empty", answer: "没有数据", data: [], context: null },
+    ]);
+    stream.send({ type: "data", result: initial });
+    stream.close();
+    await sendPrompt(initial.question);
+    await vi.waitFor(() =>
+      expect(document.querySelector(".ai-status").textContent).toBe(
+        "数据已完成，文字解读未完成",
+      ),
+    );
+    expect(document.querySelector(".ai-data-section").textContent).toContain(
+      "选手甲",
+    );
+    expect(document.querySelector(".ai-evidence").textContent).toContain("20");
+    expect(calls).toHaveLength(1);
+    document.querySelector(".ai-followups button").click();
+    await nextTick();
+    await sendPrompt();
+    expect(calls[1].context).toEqual(initial.context);
+  });
+
+  it("新问题取消旧解读；迟到旧流不会重置新查询loading、表格或上下文", async () => {
+    const previous = controlledResponse();
+    const current = controlledResponse();
+    const initial = dataResult();
+    const calls = await mountClarificationFlow([
+      previous.response,
+      current.response,
+    ]);
+    previous.send({ type: "data", result: initial });
+    await sendPrompt(initial.question);
+    const oldSignal = fetch.mock.calls.find(
+      ([path]) => path === "/api/ai/query-stream",
+    )[1].signal;
+    document.querySelector(".query-actions .text-button").click();
+    await nextTick();
+    expect(oldSignal.aborted).toBe(true);
+    const sending = sendPrompt("新问题");
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]).toEqual({ prompt: "新问题" });
+    previous.send({
+      type: "explanation",
+      result: { ...initial, explanation_status: "complete", answer: "旧解读" },
+    });
+    previous.send({ type: "done" });
+    previous.close();
+    await nextTick();
+    expect(document.querySelector("#ai-prompt").disabled).toBe(true);
+    expect(document.querySelector(".ai-data-section")).toBeNull();
+    const updated = {
+      ...initial,
+      question: "新问题",
+      data: [{ player: "选手乙", avg_kda: 8 }],
+      context: { plan: { entity: "players", filters: {} } },
+      explanation_status: "skipped",
+    };
+    current.send({ type: "data", result: updated });
+    current.send({ type: "done" });
+    current.close();
+    await sending;
+    expect(document.querySelector(".ai-data-section").textContent).toContain(
+      "选手乙",
+    );
+    expect(
+      document.querySelector(".ai-data-section").textContent,
+    ).not.toContain("选手甲");
+    expect(
+      document.querySelector(".ai-answer")?.textContent || "",
+    ).not.toContain("旧解读");
+  });
+
+  it("解读服务失败时保留返回数据，提供数据摘要而不标成解读完成", async () => {
+    const stream = controlledResponse();
+    const initial = dataResult();
+    await mountClarificationFlow([stream.response]);
+    stream.send({ type: "data", result: initial });
+    stream.send({
+      type: "explanation",
+      result: {
+        ...initial,
+        answer: "样本20局。",
+        explanation_status: "unavailable",
+        assumptions: [
+          ...initial.assumptions,
+          "文字解读暂不可用，数据查询已完成。",
+        ],
+      },
+    });
+    stream.send({ type: "done" });
+    stream.close();
+    await sendPrompt(initial.question);
+    expect(document.querySelector(".ai-status").textContent).toBe(
+      "数据已完成，文字解读未完成",
+    );
+    expect(
+      document.querySelector(".ai-interpretation summary").textContent,
+    ).toBe("查看数据摘要");
+    expect(document.querySelector(".ai-data-section").textContent).toContain(
+      "选手甲",
+    );
+    expect(document.querySelector(".ai-assumptions").textContent).toContain(
+      "文字解读暂不可用",
+    );
+  });
+
   it("首次范围问题点选指标后，完整保留赛年、赛事与核验条件再发送", async () => {
     const question = "仅2014年已确认赛程且已核验的LPL比赛，谁最强？";
     const selected = question + "\n补充比较口径：同为中单，按平均单局KDA比较。";
@@ -179,7 +427,7 @@ describe("AI 追问与澄清操作", () => {
         let payload;
         if (path.startsWith("/api/ai/query")) {
           calls.push(JSON.parse(options.body));
-          payload = { result: responses[calls.length - 1] };
+          return streamResponse(responses[calls.length - 1]);
         } else if (path.startsWith("/api/stats"))
           payload = {
             stats: { matches: 0, players: 0, teams: 0, verified_matches: 0 },

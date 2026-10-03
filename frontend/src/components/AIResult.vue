@@ -15,7 +15,13 @@ import Icon from "./Icon.vue";
 const Chart = defineAsyncComponent(() => import("./Chart.vue"));
 const props = defineProps({ result: { type: Object, required: true } });
 defineEmits(["choose"]);
-const status = computed(() => aiStatuses[props.result.status] || aiStatuses.ok);
+const status = computed(() => {
+  if (props.result.explanation_status === "pending")
+    return { label: "数据已就绪，正在解读", className: "complete" };
+  if (props.result.explanation_status === "unavailable")
+    return { label: "数据已完成，文字解读未完成", className: "empty" };
+  return aiStatuses[props.result.status] || aiStatuses.ok;
+});
 const answer = computed(() => renderAnswer(props.result.answer));
 const columns = computed(() => resultColumns(props.result));
 const samples = computed(() => evidenceItems(props.result.evidence));
@@ -137,16 +143,23 @@ const range = computed(() => evidenceRange(evidence.value));
     <details
       v-if="
         result.answer &&
+        result.explanation_status !== 'pending' &&
         result.data?.length &&
         !['needs_clarification', 'unsupported'].includes(result.status)
       "
       class="ai-interpretation"
     >
-      <summary>查看 AI 解读</summary>
+      <summary>
+        {{
+          ["unavailable", "skipped"].includes(result.explanation_status)
+            ? "查看数据摘要"
+            : "查看 AI 解读"
+        }}
+      </summary>
       <div class="markdown ai-answer" v-html="answer"></div>
     </details>
     <div
-      v-else-if="result.answer"
+      v-else-if="result.answer && result.explanation_status !== 'pending'"
       class="markdown ai-answer"
       v-html="answer"
     ></div>
