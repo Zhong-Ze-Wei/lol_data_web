@@ -11,14 +11,17 @@ from app.models import Match, Player, Team
 from app.routes.common import (POSITION_ALIASES, POSITION_LABELS, date_bounds, filter_dates, integer_arg,
                                normalized_position, page_args, player_known_results, player_wins,
                                position_arg, position_filter, rounded, win_rate)
+from app.services.stat_metrics import per_minute_value
 
 AXES = [
     {'key': 'kda', 'label': 'KDA', 'unit': ''},
     {'key': 'part', 'label': '参团率', 'unit': '%'},
     {'key': 'atk_p', 'label': '伤害占比', 'unit': '%'},
     {'key': 'def_p', 'label': '承伤占比', 'unit': '%'},
-    {'key': 'money_M', 'label': '分均经济', 'unit': '金币/分钟'},
-    {'key': 'adc_m', 'label': '分均补刀', 'unit': '刀/分钟'},
+    {'key': 'money_M', 'label': '分均经济', 'unit': '金币/分钟',
+     'definition': '逐局总经济×60/比赛完整时长秒，再取均值；缺失与一秒占位不参与。'},
+    {'key': 'adc_m', 'label': '分均补刀', 'unit': '刀/分钟',
+     'definition': '逐局补刀总量×60/比赛完整时长秒，再取均值；缺失与一秒占位不参与。'},
 ]
 
 DATE_POLICY = '时间筛选和月趋势仅使用已确认赛程日期；来源更新时间与未知日期不参与时间分析。'
@@ -49,10 +52,15 @@ def _aggregate_players(start, end, position, minimum, name=None):
     query = query.with_entities(
         Player.name, normalized.label('position'), count.label('matches_count'),
         player_wins(Player.result).label('wins'), player_known_results(Player.result).label('known_results'),
-        *[func.avg(getattr(Player, axis['key'])).label(axis['key']) for axis in AXES],
-        *[func.count(getattr(Player, axis['key'])).label(f"{axis['key']}_samples") for axis in AXES],
+        *[func.avg(_axis_expression(axis['key'])).label(axis['key']) for axis in AXES],
+        *[func.count(_axis_expression(axis['key'])).label(f"{axis['key']}_samples") for axis in AXES],
     ).group_by(Player.name, normalized).having(count >= minimum)
     return query.order_by(count.desc(), Player.name, normalized).all()
+
+
+def _axis_expression(key):
+    totals = {'money_M': Player.money, 'adc_m': Player.hits}
+    return per_minute_value(totals[key], Match.game_time) if key in totals else getattr(Player, key)
 
 
 def _latest_teams(start, end, position, name=None):
@@ -135,12 +143,14 @@ def _monthly(query):
     rows = query.filter(Match.date_source == 'schedule', Match.date.isnot(None)).with_entities(
         year.label('year'), month.label('month'), func.count(Player.id).label('matches_count'),
         player_wins(Player.result).label('wins'), player_known_results(Player.result).label('known'),
-        *[func.avg(getattr(Player, axis['key'])).label(axis['key']) for axis in AXES],
+        *[func.avg(_axis_expression(axis['key'])).label(axis['key']) for axis in AXES],
+        *[func.count(_axis_expression(axis['key'])).label(f"{axis['key']}_samples") for axis in AXES],
     ).group_by(year, month).order_by(year, month).all()
     return [{
         'month': f'{int(row.year):04d}-{int(row.month):02d}', 'matches_count': row.matches_count,
         'win_rate': win_rate(row.wins, row.known),
         **{axis['key']: rounded(getattr(row, axis['key'])) for axis in AXES},
+        **{f"{axis['key']}_samples": getattr(row, f"{axis['key']}_samples") for axis in AXES},
     } for row in rows]
 
 
@@ -195,7 +205,8 @@ def teams_analytics():
     if names:
         query = query.filter(Team.team_name.in_(names))
     rows = query.with_entities(Team.team_name, count.label('matches_count'), wins.label('wins'), known.label('known'),
-                               *[func.avg(getattr(Team, field)).label(key) for key, field in fields.items()]
+                               *[func.avg(case((Match.game_time > 1, Match.game_time)) if field == 'game_time'
+                                          else getattr(Team, field)).label(key) for key, field in fields.items()]
                                ).group_by(Team.team_name).order_by(count.desc(), Team.team_name).limit(10).all()
     teams = [{'team_name': row.team_name, 'matches_count': row.matches_count, 'wins': row.wins,
               'known_results': row.known, 'win_rate': win_rate(row.wins, row.known),

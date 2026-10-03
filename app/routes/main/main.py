@@ -15,9 +15,10 @@ def recent_matches():
     matches = []
     for match in recent:
         item = match_data(match)
+        duration = item['game_time']
         item.update(red_team=match.red_team_name, blue_team=match.blue_team_name,
                     winner=match.win_team_name,
-                    duration=f'{match.game_time // 60}:{match.game_time % 60:02d}' if match.game_time else '未知')
+                    duration=f'{duration // 60}:{duration % 60:02d}' if duration is not None else '未知')
         matches.append(item)
     return jsonify(matches=matches, status='success')
 
@@ -63,7 +64,7 @@ def top_teams():
 
 def _duration_matches(descending):
     order = Match.game_time.desc() if descending else Match.game_time.asc()
-    rows = Match.query.filter(Match.game_time > 0).order_by(order, Match.id.desc()).limit(3).all()
+    rows = Match.query.filter(Match.game_time > 1).order_by(order, Match.id.desc()).limit(3).all()
     return jsonify(matches=[match_data(match) for match in rows], status='success')
 
 
