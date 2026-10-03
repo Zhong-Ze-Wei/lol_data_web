@@ -45,3 +45,13 @@
 变化涉及 71 个颜色侧：SP→APK 1、AST→OG 9、EG→EF 4、DIG→CG 1、CEC→YC 56。胜方名称按原双方归属映射，成绩、选手昵称、日期和指标均未重放。修复前完整备份 SHA 为 `e42af92de596b50a18627b741f272e1f0d0b226b574186dcf1187dc8c2bd900d`。隔离库重复实际应用、主库重复只读检查均为 70 noop、零差异、无新备份。该入口本次零上游和 AI 请求。
 
 本地证据分别保存在 `artifacts/bo-fallback-name-isolated-v2-proof.json`、`artifacts/bo-fallback-name-production-v2-proof.json`；逐局事务在 `data/reports/bo-fallback-team-names-v2/`。生产 `/match/19825` 的 HLE/APK、40:36 时长、16/10 击杀及选手归属经实际接口和 1440/390px 页面抽查，页面无文档溢出、NaN、浏览器错误或 AI 请求。此处的名称表示该局绑定赛程的来源标签，不构成全局俱乐部别名。
+
+## 同名 3,953 局仅补证据
+
+另一批明确同名的 3,953 局经过新副本审计、实际应用、独立原件核验和重复应用。香港时间 06:45:41 正式应用完成，applied 3,953、blocked/failed 0，唯一变化列为 `matches.team_name_provenance`；所有队名、胜方、指标、主键、schema、选手及来源/采集任务字段均保持一致。全库核对 462,073 条记录身份和 12,614,798 个受保护字段，再额外强制所有名称字段也不能改变。
+
+正式执行在原采集锁内先对当前库做只读预检，确认每局计划仅涉及证据；同锁内完成原件重新核验、完整备份、实际应用、修复后在线快照和独立来源核验。独立核验使用 99 份绑定赛程版本、实际备用 BO 和双方 ID，未调用名称选择政策作为答案。释放锁后只比较两个冻结数据库，再对主库只读复查，3,953 局全部 noop；后台恢复第47批，执行器会话与进程保留。
+
+备份 SHA 为 `77623299179ad77c359d9fe3f1e5eba8fe795dee25004aad1529664bf2222811`。本地证明为 `artifacts/bo-proof-only-isolated-v2-proof.json`、`artifacts/bo-proof-only-production-v2-proof.json`，完整来源配对另存 `artifacts/bo-proof-only-production-v2-sources.json`，逐局事务在 `data/reports/bo-proof-only-v2/`。本次零上游、AI 请求及原件写入；最早冻结记录没有详情历史 SHA 的限制继续保留，不能把本次字节核验宣称为原件从未变化。
+
+52 局缺赛程绑定的只读审计实际核验 1,243 份现存原件，目标 14 个 BO 均没有唯一赛程原行，当前可离线恢复为 0。34 局已有明确赛事 ID（1009、1010、1011、1021），这4个目录仍 queued 且无阶段原件；另18局赛事归属缺失。保留已导入单局，等待后续真实目录提供绑定，不凭名称或日期补造归属；完整范围与 SHA 见本地 `artifacts/audit-missing-schedule-bindings-v2.json`。
