@@ -191,8 +191,9 @@ def result_columns(plan):
         columns.append({"key": key, "label": definition["label"], "type": "number", "unit": definition["unit"], "definition": definition["definition"] or "仅对已知值计算，缺失值不算零。"})
     columns.append({"key": "sample_size", "label": "样本出场数" if plan["subject"] != "match" else "样本局数", "type": "number", "unit": "次" if plan["subject"] != "match" else "局", "definition": GRAINS[plan["subject"]]})
     for key in plan["metrics"]:
-        if METRICS[plan["subject"]][key]["operation"] in {"avg", "aggregate_kda", "binary_rate", "rate_per_min"}:
-            columns.append({"key": f"{key}_samples", "label": f"{METRICS[plan['subject']][key]['label']}有效样本", "type": "number", "unit": "次", "definition": "实际参与该指标计算的非空样本数。"})
+        if METRICS[plan["subject"]][key]["operation"] in {"avg", "aggregate_kda", "binary_rate", "rate_per_min", "win_rate"}:
+            definition = "胜负已知出场数，胜率分母；未知胜负不计入。" if key == "win_rate" else "实际参与该指标计算的非空样本数。"
+            columns.append({"key": f"{key}_samples", "label": f"{METRICS[plan['subject']][key]['label']}有效样本", "type": "number", "unit": "次", "definition": definition})
     if plan["per_group_top_n"]:
         columns.append({"key": "group_rank", "label": "组内排名", "type": "number", "unit": "", "definition": "按已选指标在当前分组内排序，同值按实体名称稳定排列。"})
     return columns

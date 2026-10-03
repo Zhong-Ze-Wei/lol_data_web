@@ -94,6 +94,20 @@ def test_win_rate_excludes_unknown_results_and_kda_definitions_are_distinct(samp
     assert evidence[0]["unknown_results"] == 2
 
 
+def test_win_rate_sample_column_exposes_the_actual_denominator_to_the_ui(client, ai, sample_data):
+    ai.side_effect = [json.dumps(plan(metrics=["win_rate"], filters={"player": ["Faker"]}, order_by="win_rate")), "胜率为50%，分母为2次已知胜负出场。"]
+    response = client.post("/api/ai/query", json={"prompt": "Faker胜率及分母"})
+    assert response.status_code == 200
+    result = response.json["result"]
+    denominator = next(column for column in result["columns"] if column["key"] == "win_rate_samples")
+    assert denominator["label"] == "胜率有效样本"
+    assert denominator["unit"] == "次"
+    assert "胜负已知出场数" in denominator["definition"]
+    assert "胜率分母" in denominator["definition"]
+    assert result["data"][0]["win_rate_samples"] == 2
+    assert result["data"][0]["sample_size"] == 4
+
+
 def test_zero_deaths_and_missing_metrics_remain_unknown(db, sample_data):
     db.session.execute(text("UPDATE players SET deaths=0, kills=2, assists=3 WHERE name='Faker'"))
     db.session.commit()

@@ -34,8 +34,8 @@ export function evidenceItems(evidence = {}) {
     ["rows", "统计记录", "条"],
     ["verified_matches", "已核验", "场"],
     ["unverified_matches", "未核验", "场"],
-    ["known_results", "胜负已知", "场"],
-    ["unknown_results", "胜负未记录", "场"],
+    ["known_results", "胜负已知记录", "条"],
+    ["unknown_results", "胜负未记录", "条"],
   ];
   return fields
     .filter(([key]) => evidence[key] !== null && evidence[key] !== undefined)
