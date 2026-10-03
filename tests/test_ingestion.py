@@ -64,10 +64,10 @@ def test_upsert_does_not_grow_and_preserves_known_schedule_and_optional_fields(d
 def test_transaction_rolls_back_whole_match_and_retains_failed_task(db, payload, monkeypatch):
     original = ingestion.bulk_upsert
 
-    def fail_teams(model, rows, keys, session=None):
+    def fail_teams(model, rows, keys, session=None, preserve_nulls=True):
         if model is Team:
             raise IntegrityError('simulated_team_insert', {}, Exception('simulated failure'))
-        return original(model, rows, keys, session)
+        return original(model, rows, keys, session, preserve_nulls=preserve_nulls)
 
     monkeypatch.setattr(ingestion, 'bulk_upsert', fail_teams)
     outcome = ingest_result(payload, 66845)

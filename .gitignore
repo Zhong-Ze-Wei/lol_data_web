@@ -23,6 +23,8 @@ data/*.db*
 data/*.sqlite*
 data/*.lock
 data/schedule.json
+data/history-worker.json
+data/history-schedule.json
 data/backups/
 research/legacy/
 artifacts/

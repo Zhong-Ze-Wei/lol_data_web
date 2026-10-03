@@ -53,13 +53,15 @@ class RequestBudget:
 
 class ScoreGGClient:
     def __init__(self, budget=None, session=None, timeout=(5, 20), retries=2,
-                 backoff=1, sleep=time.sleep):
+                 backoff=1, sleep=time.sleep, min_interval=0):
         self.budget = budget or RequestBudget()
         self.session = session or requests.Session()
         self.timeout = timeout
         self.retries = retries
         self.backoff = backoff
         self.sleep = sleep
+        self.min_interval = min_interval
+        self.last_request_at = None
         self.session.headers.update({'User-Agent': 'LOLData/1.0 (+bounded-public-match-sync)'})
 
     def _retry_delay(self, response, attempt):
@@ -79,7 +81,13 @@ class ScoreGGClient:
 
     def get(self, url):
         for attempt in range(self.retries + 1):
+            if self.last_request_at is not None and self.min_interval:
+                delay = self.min_interval - (self.budget.clock() - self.last_request_at)
+                if delay > 0:
+                    self.budget.check(wait=delay)
+                    self.sleep(delay)
             self.budget.reserve()
+            self.last_request_at = self.budget.clock()
             response = None
             try:
                 remaining = self.budget.remaining_seconds()
@@ -111,7 +119,14 @@ class ScoreGGClient:
         return self.get_json(f'https://img.scoregg.com/match/result/{int(result_id)}.json')
 
     def get_result_ids(self, series_id):
-        payload = self.get_json(f'https://img.scoregg.com/match/resultlist/{int(series_id)}.json')
+        payload = self.get_result_list(series_id)
+        return result_ids_from_list(payload, series_id)
+
+    def get_result_list(self, series_id):
+        return self.get_json(f'https://img.scoregg.com/match/resultlist/{int(series_id)}.json')
+
+
+def result_ids_from_list(payload, series_id):
         if not isinstance(payload, dict) or payload.get('code') not in (200, '200'):
             raise SourceError(f'series {series_id}: resultlist 返回失败状态')
         rows = payload.get('data')
@@ -121,6 +136,62 @@ class ScoreGGClient:
             return sorted({int(row['resultID']) for row in rows})
         except (KeyError, TypeError, ValueError) as exc:
             raise SourceError(f'series {series_id}: 缺少合法 resultID') from exc
+
+
+def tournament_catalog(page):
+    """历史目录不以日期过滤；0000 日期仍有可用阶段和单局。"""
+    rows = page.get('tournament_list')
+    if not isinstance(rows, list):
+        raise SourceError('官网缺少 tournament_list')
+    catalog = {}
+    for row in rows:
+        try:
+            tid = int(row['tournamentID'])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SourceError('赛事目录缺少有效 tournamentID') from exc
+        if tid < 1 or not row.get('name'):
+            raise SourceError(f'tournament {tid}: 赛事 ID/名称无效')
+        if tid in catalog and catalog[tid] != row:
+            raise SourceError(f'tournament {tid}: 赛事目录含冲突记录')
+        catalog[tid] = row
+    return list(catalog.values())
+
+
+def tournament_stages(rounds, tournament_id):
+    if not isinstance(rounds, list):
+        raise SourceError(f'tournament {tournament_id}: 阶段结构不是列表')
+    entries = []
+    for parent in rounds:
+        try:
+            parent_id = int(parent['roundID'])
+            children = parent.get('round_son') or []
+            if not isinstance(children, list):
+                raise ValueError('round_son 不是列表')
+            for child in children or [None]:
+                key = str(int(child['id'])) if child is not None else f'p_{parent_id}'
+                entries.append({'cache_key': key, 'parent_round_id': parent_id,
+                                'name': child.get('name') if child else parent.get('name'),
+                                'source': parent})
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SourceError(f'tournament {tournament_id}: 阶段 ID/结构无效') from exc
+    return entries
+
+
+def history_schedule(row, tournament_id, tournament_name):
+    try:
+        sid = int(row['matchID'])
+        if sid < 1:
+            raise ValueError('matchID 必须为正数')
+        scheduled = _schedule_date(row) if row.get('match_date') not in (None, '', '0000-00-00') else None
+        publication = row.get('is_publist')
+        if publication not in (None, '', 0, 1, '0', '1'):
+            raise ValueError('is_publist 不在 0/1 范围')
+        return {'series_id': sid, 'tournament_id': tournament_id, 'tournament_name': tournament_name,
+                'scheduled_at': scheduled, 'status': str(row['status']) if row.get('status') is not None else None,
+                'is_publist': int(publication) if publication not in (None, '') else None,
+                'series_score': {'team_a': row.get('team_a_win'), 'team_b': row.get('team_b_win')}}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SourceError(f'tournament {tournament_id}: 系列赛 ID/日期/发布状态无效') from exc
 
 
 def parse_tournament_page(html):

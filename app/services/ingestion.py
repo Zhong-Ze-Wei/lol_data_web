@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app import db
 from app.models.match import Match
@@ -23,6 +23,12 @@ class NonLOLResult(InvalidResult):
 
 
 class PendingResult(InvalidResult):
+    pass
+
+
+class SourceIncompleteResult(InvalidResult):
+    """已发布历史战报确有缺项；保留原始依据，不能制造完整的业务行。"""
+
     pass
 
 
@@ -65,7 +71,7 @@ def _winner(value, field):
     return parsed
 
 
-def normalize_result(payload, result_id, schedule=None):
+def normalize_result(payload, result_id, schedule=None, allow_incomplete=False):
     if not isinstance(payload, dict):
         raise InvalidResult('详情返回值必须为 JSON 对象')
     if payload.get('code', 200) not in (200, '200'):
@@ -85,19 +91,24 @@ def normalize_result(payload, result_id, schedule=None):
         raise PendingResult('result_list 尚未生成')
     names = {side: info.get(f'{side}_name') for side in ('red', 'blue')}
     if any(not isinstance(name, str) or not name.strip() for name in names.values()):
-        raise InvalidResult('详情缺少完整的双方队名')
+        exception = SourceIncompleteResult if allow_incomplete else InvalidResult
+        raise exception('详情缺少完整的双方队名')
     if names['red'] == names['blue']:
         raise InvalidResult('双方队名相同，无法形成正确自然键')
     results = {side: _winner(info.get(f'{side}_result'), f'{side}_result') for side in names}
     if sum(results.values()) != 1:
         raise PendingResult('双方胜负尚未确定')
-    minutes = numeric(info.get('game_time_m'), 'game_time_m', integer=True, required=True)
-    seconds = numeric(info.get('game_time_s'), 'game_time_s', integer=True, required=True)
-    if seconds >= 60:
+    missing = []
+    minutes = numeric(info.get('game_time_m'), 'game_time_m', integer=True, required=not allow_incomplete)
+    seconds = numeric(info.get('game_time_s'), 'game_time_s', integer=True, required=not allow_incomplete)
+    if seconds is not None and seconds >= 60:
         raise InvalidResult('game_time_s 必须小于 60')
-    duration = minutes * 60 + seconds
-    if duration == 0:
-        raise PendingResult('单局时长尚未产生')
+    duration = minutes * 60 + seconds if minutes is not None and seconds is not None else None
+    if not duration:
+        if not allow_incomplete:
+            raise PendingResult('单局时长尚未产生')
+        duration = None
+        missing.append('game_time')
     schedule = schedule or {}
     date = schedule.get('scheduled_at')
     date_source = 'schedule' if date else 'unknown'
@@ -155,7 +166,8 @@ def normalize_result(payload, result_id, schedule=None):
             prefix = f'{side}_star_{pos}_'
             name = info.get(prefix + 'name')
             if not isinstance(name, str) or not name.strip():
-                raise InvalidResult(f'{prefix}name: 缺少选手，完整单局需要 10 位选手')
+                exception = SourceIncompleteResult if allow_incomplete else InvalidResult
+                raise exception(f'{prefix}name: 缺少选手，完整单局需要 10 位选手')
             team[f'player_{pos}_id'] = name
             player = {
                 'match_id': result_id, 'date': date, 'name': name, 'pic': info.get(prefix + 'pic'),
@@ -168,15 +180,20 @@ def normalize_result(payload, result_id, schedule=None):
                 key = prefix + source
                 player[target] = numeric(
                     info.get(key), key, integer=target in player_ints,
-                    required=target in ('kills', 'deaths', 'assists'),
+                    required=target in ('kills', 'deaths', 'assists') and not allow_incomplete,
                     percentage=target in ('part', 'atk_p', 'def_p'),
                 )
+                if target in ('kills', 'deaths', 'assists') and player[target] is None:
+                    missing.append(key)
             players.append(player)
         teams.append(team)
-    return {'matches': [match], 'teams': teams, 'players': players}
+    normalized = {'matches': [match], 'teams': teams, 'players': players}
+    if missing:
+        normalized['source_incomplete'] = missing
+    return normalized
 
 
-def bulk_upsert(model, rows, keys, session=None):
+def bulk_upsert(model, rows, keys, session=None, preserve_nulls=True):
     if not rows:
         return
     session = session or db.session
@@ -189,7 +206,8 @@ def bulk_upsert(model, rows, keys, session=None):
         statement = insert(model.__table__)
         statement = statement.on_conflict_do_update(
             index_elements=keys,
-            set_={key: func.coalesce(getattr(statement.excluded, key), model.__table__.c[key])
+            set_={key: (func.coalesce(getattr(statement.excluded, key), model.__table__.c[key])
+                       if preserve_nulls else getattr(statement.excluded, key))
                   for key in columns if key not in keys},
         )
     elif dialect in ('mysql', 'mariadb'):
@@ -197,7 +215,8 @@ def bulk_upsert(model, rows, keys, session=None):
 
         statement = insert(model.__table__)
         statement = statement.on_duplicate_key_update(
-            **{key: func.coalesce(getattr(statement.inserted, key), model.__table__.c[key])
+            **{key: (func.coalesce(getattr(statement.inserted, key), model.__table__.c[key])
+                    if preserve_nulls else getattr(statement.inserted, key))
                for key in columns if key not in keys},
         )
     else:
@@ -238,7 +257,7 @@ def finish_task(result_id, status, error=None, schedule=None, run_id=None):
     task.updated_at = utc_now()
     if status == 'failed':
         task.failure_count = (task.failure_count or 0) + 1
-    elif status in ('imported', 'skipped', 'pending'):
+    elif status in ('imported', 'skipped', 'pending', 'source_incomplete'):
         task.failure_count = 0
     task.next_retry_at = (
         utc_now() + timedelta(hours=24 if status == 'pending' else min(24, 2 ** min(task.attempts, 5)))
@@ -256,9 +275,9 @@ def mark_failure(result_id, error, schedule=None, run_id=None, status='failed'):
     return IngestOutcome(result_id, status, str(error))
 
 
-def ingest_result(payload, result_id, schedule=None, run_id=None):
+def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomplete=False, replace_existing=False):
     try:
-        data = normalize_result(payload, result_id, schedule)
+        data = normalize_result(payload, result_id, schedule, allow_incomplete)
     except NonLOLResult as exc:
         # 原始 CSV 与响应 JSON 留档；仅清理派生库中已被明确证实不是 LOL 的旧记录。
         existing = db.session.query(Match).filter_by(match_id=result_id, source='legacy', verified=False).first()
@@ -270,26 +289,35 @@ def ingest_result(payload, result_id, schedule=None, run_id=None):
             db.session.commit()
             return IngestOutcome(result_id, 'skipped', str(exc))
         return mark_failure(result_id, exc, schedule, run_id, 'skipped')
-    except PendingResult as exc:
-        return mark_failure(result_id, exc, schedule, run_id, 'pending')
+    except (PendingResult, SourceIncompleteResult) as exc:
+        status = 'source_incomplete' if allow_incomplete else 'pending'
+        return mark_failure(result_id, exc, schedule, run_id, status)
     except (InvalidResult, TypeError, ValueError) as exc:
         return mark_failure(result_id, exc, schedule, run_id)
     try:
         existing = db.session.query(Match).filter_by(match_id=result_id).first()
+        preserve_nulls = (not replace_existing and existing is not None
+                          and existing.source == 'scoregg' and existing.verified)
         if existing is not None and existing.date_source == 'schedule' and data['matches'][0]['date_source'] != 'schedule':
             data['matches'][0]['date'] = existing.date
             data['matches'][0]['date_source'] = 'schedule'
             for row in data['teams'] + data['players']:
                 row['date'] = existing.date
-        bulk_upsert(Match, data['matches'], ['match_id'])
-        bulk_upsert(Team, data['teams'], ['match_id', 'team_name'])
-        bulk_upsert(Player, data['players'], ['match_id', 'team_name', 'position'])
+        # 未核验旧值不能借本次 gameID 证据升为来源数据；首次核验按原始详情清除缺项。
+        # 只有此前已核验的 ScoreGG 记录，才允许保留早前有来源依据的可选指标。
+        bulk_upsert(Match, data['matches'], ['match_id'], preserve_nulls=preserve_nulls)
+        bulk_upsert(Team, data['teams'], ['match_id', 'team_name'], preserve_nulls=preserve_nulls)
+        bulk_upsert(Player, data['players'], ['match_id', 'team_name', 'position'], preserve_nulls=preserve_nulls)
         # 线上完整结果替换历史残缺/冲突多出来的自然键，现有正确记录仍原位更新。
         team_names = [team['team_name'] for team in data['teams']]
-        db.session.query(Player).filter(Player.match_id == result_id, ~Player.team_name.in_(team_names)).delete(synchronize_session=False)
+        db.session.query(Player).filter(Player.match_id == result_id, or_(
+            ~Player.team_name.in_(team_names), ~Player.position.in_(list('abcde')),
+        )).delete(synchronize_session=False)
         db.session.query(Team).filter(Team.match_id == result_id, ~Team.team_name.in_(team_names)).delete(synchronize_session=False)
-        finish_task(result_id, 'imported', schedule=schedule, run_id=run_id)
+        status = 'source_incomplete' if data.get('source_incomplete') else 'imported'
+        error = ', '.join(data['source_incomplete']) if data.get('source_incomplete') else None
+        finish_task(result_id, status, error, schedule=schedule, run_id=run_id)
         db.session.commit()
     except SQLAlchemyError as exc:
         return mark_failure(result_id, exc, schedule, run_id)
-    return IngestOutcome(result_id, 'imported')
+    return IngestOutcome(result_id, status, error)

@@ -14,6 +14,7 @@ from app.models.sync import SyncRun, SyncTask, utc_now
 from app.models.match import Match
 from app.services.ingestion import get_task, start_task, finish_task, ingest_result, mark_failure
 from app.services.legacy_import import import_legacy
+from app.services.history import run_history
 from app.services.spider import BudgetExceeded, RequestBudget, ScoreGGClient, SourceError, SourceHTTPError, discover_series
 
 
@@ -148,11 +149,14 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
 
 def run_pipeline(command, *, client=None, start=None, end=None, data_dir=None,
                  raw_dir=None, reports_dir=None, max_requests=400, max_seconds=900,
-                 window_days=14, now=None, force=False, max_attempts=5, tournament_ids=None, limit=20):
+                 window_days=14, now=None, force=False, max_attempts=5, tournament_ids=None, limit=20,
+                 phase='all', refresh=False, min_interval=1):
     """需要应用上下文；返回 JSON 报告及进程退出码，不隐藏上游/入库失败。"""
     raw_dir = Path(raw_dir or ROOT_DIR / 'data' / 'raw')
     reports_dir = Path(reports_dir or ROOT_DIR / 'data' / 'reports')
-    client = client or ScoreGGClient(RequestBudget(max_requests, max_seconds))
+    if min_interval < 0:
+        raise ValueError('--min-interval 必须为非负秒数')
+    client = client or ScoreGGClient(RequestBudget(max_requests, max_seconds), min_interval=min_interval)
     now = now or datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
     # 此函数由进程锁保护；上次异常退出的 running 记录可安全改为 interrupted。
     for previous in db.session.query(SyncRun).filter_by(status='running').all():
@@ -171,7 +175,11 @@ def run_pipeline(command, *, client=None, start=None, end=None, data_dir=None,
     status = 'completed'
     error = None
     try:
-        if command == 'import-legacy':
+        if command == 'history':
+            outcomes, details, status = run_history(client, run, raw_dir, reports_dir, phase=phase,
+                                                   now=now, max_attempts=max_attempts, refresh=refresh)
+            error = details.get('budget_error')
+        elif command == 'import-legacy':
             if data_dir is None:
                 raise ValueError('import-legacy 需要 --data-dir')
             details['legacy'] = import_legacy(data_dir, reports_dir, run.run_id, force=force)
@@ -267,17 +275,21 @@ def run_pipeline(command, *, client=None, start=None, end=None, data_dir=None,
     db.session.commit()
     report = run.to_dict()
     atomic_json(reports_dir / f'{run.run_id}.json', report)
-    return report, 0 if status == 'completed' else 2
+    code = 0 if status == 'completed' else 2
+    if command == 'history' and status == 'budget_exhausted':
+        code = 4
+    return report, code
 
 
 def parser():
     root = argparse.ArgumentParser(description='ScoreGG LOL 数据采集与历史迁移')
     sub = root.add_subparsers(dest='command', required=True)
-    for command in ('daily', 'backfill', 'retry', 'import-legacy', 'verify-legacy'):
+    for command in ('daily', 'backfill', 'retry', 'import-legacy', 'verify-legacy', 'history'):
         child = sub.add_parser(command)
         child.add_argument('--max-requests', type=int, default=400)
         child.add_argument('--max-seconds', type=float, default=900)
         child.add_argument('--max-attempts', type=int, default=5)
+        child.add_argument('--min-interval', type=float, default=1, help='同一进程全部 HTTP 尝试的最小间隔（秒）')
         if command == 'daily':
             child.add_argument('--window-days', type=int, default=14)
             child.add_argument('--tournament-id', action='append', type=int, dest='tournament_ids')
@@ -288,6 +300,9 @@ def parser():
             child.add_argument('--force', action='store_true', help='人工重试时忽略等待时间，仍遵守请求与失败次数预算')
         elif command == 'verify-legacy':
             child.add_argument('--limit', type=int, default=20)
+        elif command == 'history':
+            child.add_argument('--phase', choices=('discover', 'fetch', 'all'), default='all')
+            child.add_argument('--refresh', action='store_true', help='显式刷新已扫描赛事阶段；普通续批不重扫成功前缀')
         else:
             child.add_argument('--data-dir', type=Path, required=True)
             child.add_argument('--force', action='store_true', help='即使文件 hash 未变也重新解析导入，仍保留已核验 LOL/非 LOL 结果')

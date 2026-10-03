@@ -64,3 +64,86 @@ class SyncTask(db.Model):
             'series_id': self.series_id, 'tournament_id': self.tournament_id,
             'tournament_name': self.tournament_name, 'scheduled_at': self.scheduled_at,
         }
+
+
+class HistoryTournament(db.Model):
+    """官网 LOL 赛事目录；起止日期未知的赛事同样保留。"""
+
+    __tablename__ = 'history_tournaments'
+
+    tournament_id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    stage_count = db.Column(db.Integer, nullable=False, default=0)
+    expected_game_count = db.Column(db.Integer)
+    raw_file = db.Column(db.Text)
+    raw_sha256 = db.Column(db.String(64))
+    source_json = db.Column(db.Text)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    failure_count = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text)
+    next_retry_at = db.Column(db.DateTime)
+    discovered_at = db.Column(db.DateTime)
+    last_seen_at = db.Column(db.DateTime, nullable=False, default=utc_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class HistoryStage(db.Model):
+    """阶段缓存的持久游标；数字子阶段和 p_ 父阶段不能混用。"""
+
+    __tablename__ = 'history_stages'
+    __table_args__ = (db.UniqueConstraint('tournament_id', 'cache_key', name='uq_history_stage_cache'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('history_tournaments.tournament_id'), nullable=False, index=True)
+    cache_key = db.Column(db.String(60), nullable=False)
+    parent_round_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(200))
+    source_json = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    series_count = db.Column(db.Integer, nullable=False, default=0)
+    raw_file = db.Column(db.Text)
+    raw_sha256 = db.Column(db.String(64))
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    failure_count = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text)
+    next_retry_at = db.Column(db.DateTime)
+    discovered_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class HistorySeries(db.Model):
+    """赛程与战报发布状态；跨进程仍可判断待发布，不能靠错误文本猜。"""
+
+    __tablename__ = 'history_series'
+
+    series_id = db.Column(db.Integer, primary_key=True)
+    tournament_id = db.Column(db.Integer, db.ForeignKey('history_tournaments.tournament_id'), nullable=False, index=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('history_stages.id'), nullable=False)
+    scheduled_at = db.Column(db.DateTime, index=True)
+    source_status = db.Column(db.String(10))
+    is_publist = db.Column(db.Integer)
+    team_a_score = db.Column(db.Integer)
+    team_b_score = db.Column(db.Integer)
+    source_json = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    result_ids = db.Column(db.Text, nullable=False, default='[]')
+    raw_file = db.Column(db.Text)
+    raw_sha256 = db.Column(db.String(64))
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    failure_count = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text)
+    next_retry_at = db.Column(db.DateTime)
+    discovered_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+    def schedule(self):
+        return {
+            'series_id': self.series_id, 'tournament_id': self.tournament_id,
+            'tournament_name': db.session.get(HistoryTournament, self.tournament_id).name,
+            'scheduled_at': self.scheduled_at, 'status': self.source_status,
+            'is_publist': self.is_publist,
+            'series_score': {'team_a': self.team_a_score, 'team_b': self.team_b_score},
+        }

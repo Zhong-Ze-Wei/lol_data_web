@@ -7,8 +7,20 @@ from sqlalchemy import case, func
 from app import db
 from app.models.match import Match
 from app.models.sync import SyncRun, SyncTask
+from app.services.history import coverage_report
 
 sync_bp = Blueprint("sync", __name__, url_prefix="/api/sync")
+
+
+@sync_bp.get("/history")
+def history_status():
+    last_run = db.session.query(SyncRun).filter_by(command="history").order_by(SyncRun.started_at.desc()).first()
+    data_dir = Path(current_app.config["DATA_DIR"])
+    state_file, schedule_file = data_dir / "history-worker.json", data_dir / "history-schedule.json"
+    state = json.loads(state_file.read_text(encoding="utf-8")) if state_file.is_file() else None
+    schedule = json.loads(schedule_file.read_text(encoding="utf-8-sig")) if schedule_file.is_file() else {"enabled": False}
+    return jsonify(**coverage_report(), last_run=last_run.to_dict() if last_run else None,
+                   worker=state, schedule=schedule)
 
 
 @sync_bp.get("/status")
