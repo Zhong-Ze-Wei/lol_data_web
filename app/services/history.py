@@ -129,7 +129,7 @@ def _discover_tournament(client, tour, raw_dir, now):
         elif previously_discovered or source != stage.source_json:
             stage.status, stage.next_retry_at = 'queued', None
         stage.name, stage.source_json = entry['name'], source
-    tour.stage_count = len(entries)
+    tour.stage_count = db.session.query(HistoryStage).filter_by(tournament_id=tour.tournament_id).count()
     _finish(tour, 'discovered', raw=raw)
     if tour.end_date is not None and tour.end_date >= now.date():
         tour.next_retry_at = utc_now() + timedelta(days=1)
@@ -151,11 +151,31 @@ def _stage_unpublished(client, stage, error, raw_dir):
     return str(stage.parent_round_id) not in {str(item['id']) for item in published}
 
 
+def _queue_parent_stage(stage):
+    """子阶段404时保留失败，另以已知父ID尝试官方总赛程入口。"""
+    key = f'p_{stage.parent_round_id}'
+    parent = db.session.query(HistoryStage).filter_by(tournament_id=stage.tournament_id, cache_key=key).first()
+    if parent is not None:
+        return
+    source = json.loads(stage.source_json)
+    parent = HistoryStage(tournament_id=stage.tournament_id, cache_key=key,
+                          parent_round_id=stage.parent_round_id, name=source.get('name'),
+                          source_json=stage.source_json, status='queued')
+    db.session.add(parent)
+    db.session.flush()
+    tour = db.session.get(HistoryTournament, stage.tournament_id)
+    tour.stage_count = db.session.query(HistoryStage).filter_by(tournament_id=stage.tournament_id).count()
+    # 调用方会回滚本次失败；独立持久化父游标才能在预算退出后继续。
+    db.session.commit()
+
+
 def _discover_stage(client, stage, raw_dir, now):
     _start(stage)
     try:
         rows = client.get_json(f'https://img.scoregg.com/tr_round/{stage.cache_key}.json')
     except SourceHTTPError as exc:
+        if exc.status_code == 404 and not stage.cache_key.startswith('p_'):
+            _queue_parent_stage(stage)
         if _stage_unpublished(client, stage, exc, raw_dir):
             _finish(stage, 'pending', '非当前父阶段且官网统计列表没有发布此阶段；保留 HTTP404 依据')
             return
