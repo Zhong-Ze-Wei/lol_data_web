@@ -10,9 +10,10 @@ from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
 from app.models.sync import HistoryTournament, HistoryStage, HistorySeries, SyncTask, utc_now
-from app.services.history import coverage_report, repair_verified_raw
+from app.services.history import coverage_report, repair_archived_results, repair_verified_raw
 from app.services import history
-from app.services.ingestion import ingest_result
+from app.services.ingestion import ingest_result, normalize_result
+from app.services.source_identity import build_source_name_index
 from app.services.spider import RequestBudget, ScoreGGClient, SourceHTTPError
 from scripts.pipeline import run_pipeline
 
@@ -22,6 +23,18 @@ def result():
     payload = json.loads((Path(__file__).parent / 'fixtures' / 'scoregg_result_66845.json').read_text(encoding='utf-8'))
     payload['data']['max_mvp']['match_id'] = '20674'
     return payload
+
+
+@pytest.fixture
+def identity_result(result):
+    """最小 fixture 原本省略身份字段；按真实战报的 ID+color 结构补齐。"""
+    result['data']['teams'] = []
+    for index, (side, position) in enumerate((side, pos) for side in ('red', 'blue') for pos in 'abcde'):
+        identifier = '17863' if (side, position) == ('blue', 'e') else str(1000 + index)
+        result['data']['result_list'][f'{side}_star_{position}_playerID'] = identifier
+        result['data']['teams'].append({'playerID': identifier, 'color': side,
+                                       'nickname': result['data']['result_list'][f'{side}_star_{position}_name']})
+    return result
 
 
 class HistoricalSource:
@@ -155,10 +168,12 @@ def test_source_missing_historical_duration_keeps_null_and_reports_partial(db, r
     assert run(rerun, tmp_path)[1] == 0 and rerun.calls == []
 
 
-def test_source_missing_player_retains_raw_without_fabricating_business_rows(db, result, tmp_path):
+def test_source_missing_player_keeps_match_teams_and_known_roster_without_fabricating_identity(db, result, tmp_path):
     del result['data']['result_list']['blue_star_e_name']
     report, code = run(HistoricalSource(result), tmp_path)
-    assert code == 0 and db.session.query(Match).count() == 0
+    assert code == 0 and db.session.query(Match).count() == 1
+    assert db.session.query(Team).count() == 2 and db.session.query(Player).count() == 9
+    assert db.session.query(Team).filter_by(team_name='EDG').one().player_e_id is None
     assert db.session.query(SyncTask).one().status == 'source_incomplete'
     assert (tmp_path / 'raw' / 'scoregg' / '66845.json').is_file()
     assert report['details']['coverage']['years'][0]['source_incomplete'] == 1
@@ -600,11 +615,11 @@ def test_strict_daily_still_rejects_invalid_percentage_and_historical_structure_
     assert db.session.query(Match).count() == 0
     result['data']['result_list'].pop('blue_star_e_name')
     assert ingest_result(result, 66845, allow_incomplete=True).status == 'source_incomplete'
-    assert db.session.query(Match).count() == 0 and db.session.query(Player).count() == 0
+    assert db.session.query(Match).count() == 1 and db.session.query(Player).count() == 9
     result['data']['result_list']['blue_star_e_name'] = 'restored'
     result['data']['result_list']['red_star_a_kills'] = '-1'
     assert ingest_result(result, 66845, allow_incomplete=True).status == 'failed'
-    assert db.session.query(Match).count() == 0
+    assert db.session.query(Match).count() == 1
 
 
 def test_failed_historical_percentage_recovery_reuses_raw_without_network_or_retries(db, result, tmp_path):
@@ -641,3 +656,140 @@ def test_explicit_catalog_refresh_still_requeues_all_discovered_children(db, res
     history._seed_catalog(source, tmp_path / 'raw', refresh=True)
     assert len(source.calls) == 1 and tour.status == 'queued'
     assert stage.status == 'queued' and db.session.get(HistorySeries, 20674).status == 'queued'
+
+
+@pytest.mark.parametrize('minutes,seconds', [('00', '01'), ('0', '0'), ('33', '60'), ('-1', '10'), ('bad', '10')])
+def test_history_bad_or_placeholder_duration_clears_all_previous_source_values(db, result, minutes, seconds):
+    assert ingest_result(result, 66845).status == 'imported'
+    result['data']['result_list'].update(game_time_m=minutes, game_time_s=seconds)
+    outcome = ingest_result(result, 66845, allow_incomplete=True)
+    assert outcome.status == 'source_incomplete' and 'game_time' in outcome.error
+    for model in (Match, Team, Player):
+        assert all(row.game_time is None for row in db.session.query(model))
+    assert db.session.query(Player).count() == 10 and db.session.query(Team).count() == 2
+    task = db.session.query(SyncTask).one()
+    assert task.failure_count == 0 and task.next_retry_at is None
+
+
+@pytest.mark.parametrize('seconds,status', [('01', 'pending'), ('60', 'failed')])
+def test_daily_duration_validation_remains_strict(db, result, seconds, status):
+    result['data']['result_list'].update(game_time_m='00' if seconds == '01' else '33', game_time_s=seconds)
+    assert ingest_result(result, 66845).status == status
+    assert db.session.query(Match).count() == 0
+
+
+@pytest.mark.parametrize('source,verified', [('legacy', False), ('scoregg', True)])
+def test_history_missing_name_removes_previous_slot_and_team_name_reference(db, identity_result, source, verified):
+    result = identity_result
+    ingest_result(result, 66845)
+    match = db.session.query(Match).one()
+    match.source, match.verified = source, verified
+    db.session.commit()
+    result['data']['result_list']['blue_star_e_name'] = ''
+    normalized = normalize_result(result, 66845, allow_incomplete=True)
+    slot = normalized['missing_roster_slots'][0]
+    assert slot['team_name'] == 'EDG' and slot['position'] == 'e'
+    assert slot['source_player_id'] == '17863'
+    outcome = ingest_result(result, 66845, allow_incomplete=True)
+    assert outcome.status == 'source_incomplete'
+    assert db.session.query(Match).one().verified is True
+    assert db.session.query(Player).count() == 9
+    assert db.session.query(Player).filter_by(team_name='EDG', position='e').count() == 0
+    assert db.session.query(Team).filter_by(team_name='EDG').one().player_e_id is None
+
+
+def _write_source_raw(tmp_path, result, result_id):
+    raw = tmp_path / 'raw' / 'scoregg' / f'{result_id}.json'
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+    return raw
+
+
+def test_source_name_index_recovers_by_unique_id_and_color_with_raw_sha_audit(db, identity_result, tmp_path):
+    result = identity_result
+    anchor = _write_source_raw(tmp_path, result, 66844)
+    result['data']['result_list']['blue_star_e_name'] = ''
+    result['data']['teams'] = list(reversed(result['data']['teams']))
+    next(row for row in result['data']['teams'] if row['playerID'] == '17863')['nickname'] = ''
+    raw = _write_source_raw(tmp_path, result, 66845)
+    original = raw.read_bytes()
+    index = build_source_name_index(tmp_path / 'raw')
+    assert index['request_count'] == 0 and index['checked'] == 2 and index['accepted'] == 2
+    recovered = index['names_by_source_id']['17863']
+    assert recovered['name'] == 'Parukia' and recovered['references'][0]['raw_file'] == str(anchor.resolve())
+    names = index['names_by_source_id']
+    audit = repair_archived_results(tmp_path / 'raw', tmp_path / 'reports', result_ids=[66845], names_by_source_id=names)
+    assert audit['changed_records'] == 1 and audit['applied'] == 0 and db.session.query(Match).count() == 0
+    proof = audit['records'][0]['recovered_player_names'][0]
+    assert proof['source_player_id'] == '17863' and proof['references'][0]['raw_sha256']
+    applied = repair_archived_results(tmp_path / 'raw', tmp_path / 'reports', result_ids=[66845],
+                                     names_by_source_id=names, apply=True)
+    assert applied['request_count'] == 0 and applied['applied'] == 1 and applied['blocked'] == 0
+    assert db.session.query(Player).filter_by(team_name='EDG', position='e').one().name == 'Parukia'
+    assert db.session.query(Player).count() == 10 and db.session.query(SyncTask).one().status == 'imported'
+    assert raw.read_bytes() == original
+    repeat = repair_archived_results(tmp_path / 'raw', tmp_path / 'reports', result_ids=[66845], names_by_source_id=names)
+    assert repeat['changed_records'] == 0
+
+
+def test_source_name_index_refuses_conflicts_and_explicit_wrong_result_game_ids(identity_result, tmp_path):
+    result = identity_result
+    _write_source_raw(tmp_path, result, 66841)
+    conflict = copy.deepcopy(result)
+    conflict['data']['result_list']['blue_star_e_name'] = 'UnrelatedNickname'
+    _write_source_raw(tmp_path, conflict, 66842)
+    wrong = copy.deepcopy(result)
+    wrong['data']['resultID'] = '999'
+    _write_source_raw(tmp_path, wrong, 66843)
+    nonlol = copy.deepcopy(result)
+    nonlol['data']['gameID'] = '2'
+    _write_source_raw(tmp_path, nonlol, 66844)
+    index = build_source_name_index(tmp_path / 'raw')
+    assert '17863' not in index['names_by_source_id']
+    assert index['conflicts']['17863'] == ['Parukia', 'UnrelatedNickname']
+    assert len(index['rejected']) == 2
+    result['data']['result_list']['blue_star_e_name'] = ''
+    normalized = normalize_result(result, 66845, allow_incomplete=True, names_by_source_id=index['names_by_source_id'])
+    assert len(normalized['players']) == 9 and not normalized.get('recovered_player_names')
+
+
+def test_source_name_index_casefold_is_only_for_conflict_check_not_alias_guessing(identity_result, tmp_path):
+    result = identity_result
+    _write_source_raw(tmp_path, result, 66841)
+    variant = copy.deepcopy(result)
+    variant['data']['result_list']['blue_star_e_name'] = 'PARUKIA'
+    next(row for row in variant['data']['teams'] if row['playerID'] == '17863')['nickname'] = 'PARUKIA'
+    _write_source_raw(tmp_path, variant, 66842)
+    index = build_source_name_index(tmp_path / 'raw')
+    assert '17863' not in index['conflicts'] and index['names_by_source_id']['17863']['name'] == 'Parukia'
+
+
+@pytest.mark.parametrize('mismatch', ['duplicate_slot_id', 'wrong_color', 'duplicate_team_id'])
+def test_name_recovery_refuses_ambiguous_current_identity_instead_of_array_position(identity_result, tmp_path, mismatch):
+    result = identity_result
+    _write_source_raw(tmp_path, result, 66844)
+    names = build_source_name_index(tmp_path / 'raw')['names_by_source_id']
+    result['data']['result_list']['blue_star_e_name'] = ''
+    target = next(row for row in result['data']['teams'] if row['playerID'] == '17863')
+    if mismatch == 'duplicate_slot_id':
+        result['data']['result_list']['red_star_e_playerID'] = '17863'
+    elif mismatch == 'wrong_color':
+        target['color'] = 'red'
+    else:
+        result['data']['teams'].append(copy.deepcopy(target))
+    normalized = normalize_result(result, 66845, allow_incomplete=True, names_by_source_id=names)
+    assert len(normalized['players']) == 9 and not normalized.get('recovered_player_names')
+
+
+def test_recovery_replay_blocks_changed_reference_and_keeps_original_target(db, identity_result, tmp_path):
+    result = identity_result
+    anchor = _write_source_raw(tmp_path, result, 66844)
+    names = build_source_name_index(tmp_path / 'raw')['names_by_source_id']
+    result['data']['result_list']['blue_star_e_name'] = ''
+    raw = _write_source_raw(tmp_path, result, 66845)
+    original = raw.read_bytes()
+    anchor.write_text('{}', encoding='utf-8')
+    audit = repair_archived_results(tmp_path / 'raw', tmp_path / 'reports', result_ids=[66845],
+                                   names_by_source_id=names, apply=True)
+    assert audit['blocked'] == 1 and audit['applied'] == 0 and db.session.query(Match).count() == 0
+    assert 'SHA' in audit['records'][0]['error'] and raw.read_bytes() == original

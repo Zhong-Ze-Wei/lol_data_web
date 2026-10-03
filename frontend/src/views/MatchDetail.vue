@@ -24,6 +24,35 @@ const resource = useResource(
   [() => route.params.match_id],
 );
 const match = computed(() => resource.data.value?.match);
+const players = computed(() => resource.data.value?.players || []);
+const hasDamage = computed(() =>
+  players.value.some((player) => player.atk != null),
+);
+const qualityNotice = computed(() => {
+  if (!match.value) return "";
+  const notes = [];
+  if (players.value.length < 10) {
+    notes.push(
+      match.value.verified
+        ? "公开战报阵容有缺项，个人统计仅包含已确认选手"
+        : "历史记录阵容不完整，个人统计仅包含已收录选手",
+    );
+  }
+  if (match.value.game_time == null || match.value.game_time <= 1) {
+    notes.push("缺少可信比赛时长，分均指标未计算");
+  }
+  const missingMetrics = [
+    ["atk", "伤害"],
+    ["money", "经济"],
+    ["hits", "补刀"],
+  ]
+    .filter(([key]) => players.value.some((player) => player[key] == null))
+    .map(([, label]) => label);
+  if (missingMetrics.length) {
+    notes.push(`部分${missingMetrics.join("、")}数据缺失，空值未计为零`);
+  }
+  return notes.length ? `${notes.join("；")}。` : "";
+});
 const sides = computed(() =>
   resource.data.value
     ? [
@@ -91,7 +120,10 @@ const damage = computed(() => {
   <header class="page-heading">
     <div>
       <h1>比赛详情</h1>
-      <p>比赛 #{{ route.params.match_id }}</p>
+      <p>
+        比赛 #{{ route.params.match_id
+        }}<span v-if="match"> · 已收录 {{ players.length }}/10 位选手</span>
+      </p>
     </div>
     <MatchStatus v-if="match" :verified="match.verified" />
   </header>
@@ -100,7 +132,10 @@ const damage = computed(() => {
     :error="resource.error.value"
     @retry="resource.reload"
     ><template v-if="match"
-      ><section class="match-scoreboard">
+      ><p v-if="qualityNotice" class="match-quality-notice" role="status">
+        {{ qualityNotice }}
+      </p>
+      <section class="match-scoreboard">
         <div class="score-team blue">
           <span class="eyebrow">蓝方</span
           ><RouterLink :to="detailLink('team', match.blue_team_name)">{{
@@ -224,10 +259,12 @@ const damage = computed(() => {
           <span class="tag">本场原始值</span>
         </header>
         <Chart
+          v-if="hasDamage"
           :option="damage"
-          label="本场十位选手对英雄总伤害条形图"
+          label="本场已收录选手对英雄总伤害条形图"
           :height="380"
         />
+        <p v-else class="muted">本场没有可信伤害记录，未生成伤害图。</p>
         <p class="chart-note">
           伤害受英雄、位置、阵容与比赛时长影响。以上数据仅描述本场比赛。
         </p>
@@ -235,3 +272,15 @@ const damage = computed(() => {
     </template></ResourceState
   >
 </template>
+<style scoped>
+.match-quality-notice {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #ffe3ba;
+  border-radius: 5px;
+  background: #fff9ef;
+  color: #865a1d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+</style>

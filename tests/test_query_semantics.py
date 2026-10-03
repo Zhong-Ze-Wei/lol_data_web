@@ -12,6 +12,7 @@ from app.services import ai_assistant
 from app.services.ai_assistant import AIUnavailable, execute_readonly_batch, validate_sql
 from app.services.query_compiler import compile_plan
 from app.services.query_semantics import METRICS, InvalidPlan, UnsafePlan, entity_catalog, parse_plan, resolve_entities, validate_plan
+from app.services.stat_metrics import per_minute_number
 
 
 def plan(**overrides):
@@ -221,6 +222,160 @@ def test_team_per_minute_metrics_exclude_missing_duration(sample_data):
     assert result[0]["damage_per_min_samples"] == 2
 
 
+def test_player_rates_recalculate_real_source_outliers_without_changing_raw_values(db):
+    # 历史来源的两条已确认异常：分均值比可核对总量高几个数量级。
+    db.session.add_all([
+        Match(match_id=3260, game_time=2682),
+        Match(match_id=4325, game_time=3033),
+        Player(match_id=3260, name="Cola", team_name="A", position="a",
+               hits=269, adc_m=16140, game_time=1),
+        Player(match_id=4325, name="TrAce", team_name="B", position="a",
+               atk=16940, atk_m=1016400, game_time=3600),
+    ])
+    db.session.commit()
+    result, _ = rows(plan(metrics=["damage_per_min", "cs_per_min"], order_by="damage_per_min"))
+    by_name = {row["player"]: row for row in result}
+    assert by_name["Cola"]["cs_per_min"] == pytest.approx(269 * 60 / 2682)
+    assert by_name["Cola"]["cs_per_min_samples"] == 1
+    assert by_name["TrAce"]["damage_per_min"] == pytest.approx(16940 * 60 / 3033)
+    assert by_name["TrAce"]["damage_per_min_samples"] == 1
+    assert Player.query.filter_by(name="Cola").one().adc_m == 16140
+    assert Player.query.filter_by(name="TrAce").one().atk_m == 1016400
+
+
+@pytest.mark.parametrize("total, duration, expected", [
+    (269, 2682, 269 * 60 / 2682), (16940, 3033, 16940 * 60 / 3033),
+    (0, 1801, 0), (None, 1801, None), (-1, 1801, None),
+    (100, None, None), (100, -1, None), (100, 0, None), (100, 1, None),
+])
+def test_single_row_dto_rate_uses_the_same_business_values(total, duration, expected):
+    actual = per_minute_number(total, duration)
+    assert actual is None if expected is None else actual == pytest.approx(expected)
+
+
+def test_player_rate_metrics_use_full_seconds_and_independent_valid_samples(db):
+    for match_id, duration, values in [
+        (10, 1801, {"atk": 18010, "def_": None, "money": 0, "hits": 180}),
+        (11, 3601, {"atk": None, "def_": 7202, "money": 36010, "hits": None}),
+        (12, 1801, {"atk": -1, "def_": -1, "money": -1, "hits": -1}),
+    ]:
+        db.session.add(Match(match_id=match_id, game_time=duration))
+        db.session.add(Player(match_id=match_id, name="rate_check", team_name="A", position="c",
+                              game_time=1, atk_m=999999, def_m=999999,
+                              money_M=999999, adc_m=999999, **values))
+    db.session.commit()
+    result, _ = rows(plan(metrics=["games", "damage_per_min", "damage_taken_per_min", "gold_per_min", "cs_per_min"]))
+    row = result[0]
+    assert row["games"] == 3
+    assert row["damage_per_min"] == pytest.approx(18010 * 60 / 1801)
+    assert row["damage_taken_per_min"] == pytest.approx(7202 * 60 / 3601)
+    assert row["gold_per_min"] == pytest.approx((0 + 36010 * 60 / 3601) / 2)
+    assert row["cs_per_min"] == pytest.approx(180 * 60 / 1801)
+    assert {key: row[f"{key}_samples"] for key in ["damage_per_min", "damage_taken_per_min", "gold_per_min", "cs_per_min"]} == {
+        "damage_per_min": 1, "damage_taken_per_min": 1, "gold_per_min": 2, "cs_per_min": 1,
+    }
+
+
+@pytest.mark.parametrize("duration", [None, -10, 0, 1])
+@pytest.mark.parametrize("subject", ["player", "team"])
+def test_unknown_or_placeholder_match_duration_is_not_a_zero_rate(db, duration, subject):
+    db.session.add(Match(match_id=20, game_time=duration))
+    if subject == "player":
+        db.session.add(Player(match_id=20, name="check", team_name="A", position="c",
+                              game_time=1800, atk=60000, def_=50000, money=12000, hits=300,
+                              atk_m=999, def_m=999, money_M=999, adc_m=999))
+        metrics = ["damage_per_min", "damage_taken_per_min", "gold_per_min", "cs_per_min", "avg_duration"]
+    else:
+        db.session.add(Team(match_id=20, team_name="A", game_time=1800, attack=60000, money=55000))
+        metrics = ["damage_per_min", "gold_per_min", "avg_duration"]
+    db.session.commit()
+    result, _ = rows(plan(subject=subject, dimensions=[], metrics=metrics, order_by="damage_per_min"))
+    assert result[0]["sample_size"] == 1
+    for key in metrics:
+        assert result[0][key] is None
+        assert result[0][f"{key}_samples"] == 0
+
+
+def test_team_rates_use_match_duration_and_exclude_negative_total(db):
+    db.session.add_all([
+        Match(match_id=30, game_time=1801),
+        Match(match_id=31, game_time=3601),
+        Team(match_id=30, team_name="A", game_time=60, attack=36020, money=0),
+        Team(match_id=31, team_name="A", game_time=1, attack=-1, money=72020),
+    ])
+    db.session.commit()
+    result, _ = rows(plan(subject="team", dimensions=["team"], metrics=["damage_per_min", "gold_per_min"], order_by="gold_per_min"))
+    assert result[0]["damage_per_min"] == pytest.approx(36020 * 60 / 1801)
+    assert result[0]["damage_per_min_samples"] == 1
+    assert result[0]["gold_per_min"] == pytest.approx((0 + 72020 * 60 / 3601) / 2)
+    assert result[0]["gold_per_min_samples"] == 2
+
+
+@pytest.mark.parametrize("subject", ["player", "team", "match"])
+def test_average_duration_uses_authoritative_match_and_excludes_one_second(db, subject):
+    for match_id, duration in [(40, 1801), (41, 3601), (42, 1), (43, None)]:
+        db.session.add(Match(match_id=match_id, game_time=duration))
+        db.session.add(Player(match_id=match_id, name="check", team_name="A", position="c", game_time=60))
+        db.session.add(Team(match_id=match_id, team_name="A", game_time=120))
+    db.session.commit()
+    result, _ = rows(plan(subject=subject, dimensions=[], metrics=["avg_duration"], order_by="avg_duration"))
+    assert result[0]["sample_size"] == 4
+    assert result[0]["avg_duration"] == pytest.approx((1801 + 3601) / 2 / 60)
+    assert result[0]["avg_duration_samples"] == 2
+
+
+def test_rate_ranking_minimum_samples_excludes_placeholder_duration_games(db):
+    match_id = 100
+    for name, duration in [("complete", 1801), ("placeholder", 1)]:
+        for index in range(10):
+            match_id += 1
+            db.session.add(Match(match_id=match_id, game_time=duration if index else 1801))
+            db.session.add(Player(match_id=match_id, name=name, team_name="A", position="c",
+                                  game_time=1801, atk=18010, atk_m=999999))
+    db.session.commit()
+    result, _ = rows(plan(metrics=["damage_per_min"], order_by="damage_per_min", min_games=10))
+    assert [row["player"] for row in result] == ["complete"]
+    assert result[0]["damage_per_min_samples"] == 10
+
+
+def test_rate_endpoint_exposes_corrected_formula_and_valid_sample_denominator(client, ai, db):
+    db.session.add_all([
+        Match(match_id=50, game_time=1801),
+        Match(match_id=51, game_time=1),
+        Player(match_id=50, name="check", team_name="A", position="c", atk=18010, atk_m=999999),
+        Player(match_id=51, name="check", team_name="A", position="c", atk=18010, atk_m=999999),
+    ])
+    db.session.commit()
+    ai.side_effect = [json.dumps(plan(metrics=["damage_per_min"], order_by="damage_per_min")), "有效样本1次，分均伤害600。"]
+    response = client.post("/api/ai/query", json={"prompt": "比较分均伤害并说明有效样本"})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["data"][0]["damage_per_min"] == pytest.approx(600)
+    assert result["data"][0]["damage_per_min_samples"] == 1
+    assert result["data"][0]["sample_size"] == 2
+    column = next(item for item in result["columns"] if item["key"] == "damage_per_min")
+    denominator = next(item for item in result["columns"] if item["key"] == "damage_per_min_samples")
+    assert "完整时长秒" in column["definition"]
+    assert "1秒占位" in column["definition"]
+    assert "总量已知且非负" in denominator["definition"]
+    assert "每项指标独立计数" in denominator["definition"]
+
+
+def test_wards_keep_source_precision_and_do_not_infer_zero_total_wards(client, ai, db):
+    db.session.add(Match(match_id=60, game_time=1801))
+    db.session.add(Player(match_id=60, name="check", team_name="A", position="e", wp_m=0))
+    db.session.commit()
+    ai.side_effect = [json.dumps(plan(metrics=["wards_per_min"], order_by="wards_per_min")), "来源分均插眼为0，不能判断整局没有插眼。"]
+    response = client.post("/api/ai/query", json={"prompt": "分均插眼"})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["data"][0]["wards_per_min"] == 0
+    assert result["data"][0]["wards_per_min_samples"] == 1
+    definition = next(item for item in result["columns"] if item["key"] == "wards_per_min")["definition"]
+    assert "整数精度" in definition
+    assert "0不代表整局没有插眼" in definition
+
+
 def test_tournament_fragment_wildcards_are_literal_not_a_wide_query(sample_data):
     result, _ = rows(plan(dimensions=["tournament"], filters={"tournament_contains": ["%"]}))
     assert result == []
@@ -245,6 +400,47 @@ def test_ambiguous_entity_is_not_silently_selected():
     _, clarification = resolve_entities(value, {"team": ["T1 Main", "T1 Academy"], "player": [], "hero": [], "tournament": []}, "T1胜率")
     assert len(clarification["choices"]) == 2
     assert clarification["choices"][0]["prompt"] in {"T1 Main胜率", "T1 Academy胜率"}
+
+
+@pytest.mark.parametrize("name", ["Cola", "COLA"])
+def test_exact_player_name_resolves_case_variants_without_merging(name):
+    catalog = {"player": ["COLA", "Cola", "TrAce"], "team": [], "hero": [], "tournament": []}
+    value, clarification = resolve_entities(plan(filters={"player": [name]}), catalog, f"{name}出场数")
+    assert clarification is None
+    assert value["filters"]["player"] == [name]
+
+
+def test_normalized_case_variant_remains_ambiguous_until_exact_name_is_chosen():
+    catalog = {"player": ["COLA", "Cola", "TrAce"], "team": [], "hero": [], "tournament": []}
+    _, clarification = resolve_entities(plan(filters={"player": ["cola"]}), catalog, "cola出场数")
+    assert {choice["label"] for choice in clarification["choices"]} == {"COLA", "Cola"}
+    for choice in clarification["choices"]:
+        value, repeated = resolve_entities(plan(filters={"player": [choice["label"]]}), catalog, choice["prompt"])
+        assert repeated is None
+        assert value["filters"]["player"] == [choice["label"]]
+
+
+def test_selecting_exact_clarification_choice_ends_the_case_variant_loop(client, ai, db):
+    for match_id, name, attack in [(70, "COLA", 99999), (71, "Cola", 18010)]:
+        db.session.add(Match(match_id=match_id, game_time=1801, verified=True))
+        db.session.add(Player(match_id=match_id, name=name, team_name="A", position="c", atk=attack))
+    db.session.commit()
+    ai.side_effect = [
+        json.dumps(plan(filters={"player": ["cola"]}, metrics=["damage_per_min"], order_by="damage_per_min")),
+        json.dumps(plan(filters={"player": ["Cola"]}, metrics=["damage_per_min"], order_by="damage_per_min")),
+        "Cola 的分均伤害为600，未合并COLA。",
+    ]
+    first = client.post("/api/ai/query", json={"prompt": "cola分均伤害"})
+    assert first.json["result"]["status"] == "needs_clarification"
+    choice = next(item for item in first.json["result"]["clarification"]["choices"] if item["label"] == "Cola")
+    second = client.post("/api/ai/query", json={"prompt": choice["prompt"]})
+    assert second.status_code == 200
+    assert second.json["result"]["status"] == "ok"
+    assert second.json["result"]["data"][0]["player"] == "Cola"
+    assert second.json["result"]["data"][0]["damage_per_min"] == pytest.approx(600)
+    assert second.json["result"]["data"][0]["sample_size"] == 1
+    assert second.json["result"]["context"]["plan"]["filters"]["player"] == ["Cola"]
+    assert ai.call_count == 3
 
 
 def test_nonexistent_entity_requires_clarification(sample_data):

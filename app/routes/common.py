@@ -127,18 +127,25 @@ def match_data(match):
         'tournament_name': match.tournament_name,
         'date': match.date.strftime('%Y-%m-%d') if match.date else None,
         'date_source': match.date_source, 'source': match.source, 'verified': match.verified,
-        'game_time': match.game_time, 'red_team_name': match.red_team_name,
+        'game_time': match.game_time if match.game_time is not None and match.game_time > 1 else None,
+        'red_team_name': match.red_team_name,
         'blue_team_name': match.blue_team_name, 'win_team_name': match.win_team_name,
         'mvp': match.mvp,
     }
 
 
-def player_data(player):
+def player_data(player, match):
+    from app.services.stat_metrics import per_minute_number
+
     fields = ('name', 'pic', 'hero', 'hero_lv', 'kda', 'kills', 'deaths', 'assists',
               'part', 'atk', 'atk_p', 'atk_m', 'def_', 'def_p', 'def_m', 'adc_m',
               'hits', 'money', 'money_M', 'wp_m', 'team_name', 'position', 'result', 'match_id')
     data = {field: getattr(player, field) for field in fields}
-    data['date'] = player.date.strftime('%Y-%m-%d') if player.date else None
+    for key, total in {'atk_m': player.atk, 'def_m': player.def_,
+                       'adc_m': player.hits, 'money_M': player.money}.items():
+        data[key] = per_minute_number(total, match.game_time)
+    data['date'] = match.date.strftime('%Y-%m-%d') if match.date and match.date_source == 'schedule' else None
+    data['date_source'] = match.date_source
     return data
 
 

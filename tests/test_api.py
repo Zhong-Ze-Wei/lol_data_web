@@ -148,3 +148,62 @@ def test_end_month_includes_last_day_without_including_next_month(client, db):
     db.session.commit()
     data = client.get('/match/api/list?start_date=2024-02&end_date=2024-02').json
     assert [match['match_id'] for match in data['matches']] == [1]
+
+
+def test_per_minute_values_are_consistent_across_detail_radar_and_monthly_api(client, db):
+    for match_id, duration, damage, taken, money, cs in [
+        (1, 600, 1000, 2000, 200, 100),
+        (2, 1200, 3000, 6000, 600, 120),
+        (3, 1, 9999, 9999, 9999, 999),
+        (4, None, 9999, 9999, 9999, 999),
+    ]:
+        add_match(db, match_id, date=datetime(2024, 1, match_id), date_source='schedule', game_time=duration)
+        db.session.add(Player(match_id=match_id, name='Alice', team_name='A', position='a',
+                              date=datetime(2022, 9, 27), game_time=9999,
+                              atk=damage, def_=taken, money=money, hits=cs,
+                              atk_m=damage * 60, def_m=taken * 60, money_M=99999, adc_m=cs * 60))
+    db.session.commit()
+
+    detail = client.get('/player/api/Alice').json
+    assert detail['stats']['avgAtkM'] == 125
+    assert detail['stats']['avgDefM'] == 250
+    assert detail['stats']['avgAtkMSamples'] == detail['stats']['avgDefMSamples'] == 2
+    assert detail['stats']['totalMatches'] == 4
+    records = {row['match_id']: row for row in detail['players']}
+    assert records[1]['atk_m'] == 100 and records[1]['money_M'] == 20 and records[1]['adc_m'] == 10
+    assert records[2]['atk_m'] == 150 and records[2]['money_M'] == 30 and records[2]['adc_m'] == 6
+    assert records[1]['date'] == '2024-01-01' and records[1]['date_source'] == 'schedule'
+    assert all(records[match_id]['atk_m'] is None for match_id in (3, 4))
+    assert client.get('/match/api/1').json['players'][0]['atk_m'] == 100
+    assert client.get('/match/api/3').json['players'][0]['adc_m'] is None
+
+    analytics = client.get('/player/api/Alice/analytics?min_matches=1').json
+    assert analytics['metrics']['money_M'] == 25 and analytics['metrics']['adc_m'] == 8
+    assert analytics['metric_samples']['money_M'] == analytics['metric_samples']['adc_m'] == 2
+    assert analytics['monthly'][0]['money_M'] == 25 and analytics['monthly'][0]['adc_m'] == 8
+    assert analytics['monthly'][0]['money_M_samples'] == analytics['monthly'][0]['adc_m_samples'] == 2
+    assert analytics['matches_count'] == 4
+    # 只变更查询口径，来源原值仍可审计。
+    assert db.session.query(Player).filter_by(match_id=1).one().atk_m == 60000
+
+
+def test_player_record_date_does_not_expose_source_update_as_match_date(client, db):
+    add_match(db, 1, date=datetime(2022, 9, 27), date_source='updated_at', game_time=1200)
+    db.session.add(Player(match_id=1, name='Alice', team_name='A', position='a', date=datetime(2022, 9, 27)))
+    db.session.commit()
+    player_record = client.get('/player/api/Alice').json['players'][0]
+    match_record = client.get('/match/api/1').json['players'][0]
+    assert player_record['date'] is None and match_record['date'] is None
+    assert player_record['date_source'] == match_record['date_source'] == 'updated_at'
+
+
+def test_one_second_placeholder_is_not_a_fastest_match_or_real_display_duration(client, db):
+    add_match(db, 1, date=datetime(2024, 1, 1), date_source='schedule', game_time=1)
+    add_match(db, 2, date=datetime(2024, 1, 2), date_source='schedule', game_time=1800)
+    db.session.commit()
+    assert [row['match_id'] for row in client.get('/api/fastest-matches').json['matches']] == [2]
+    assert [row['match_id'] for row in client.get('/api/longest-matches').json['matches']] == [2]
+    recent = {row['match_id']: row for row in client.get('/api/recent-matches').json['matches']}
+    assert recent[1]['game_time'] is None and recent[1]['duration'] == '未知'
+    assert client.get('/match/api/1').json['match']['game_time'] is None
+    assert db.session.query(Match).filter_by(match_id=1).one().game_time == 1

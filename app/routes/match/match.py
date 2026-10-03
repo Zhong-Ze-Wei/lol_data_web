@@ -41,5 +41,5 @@ def get_match(match_id):
     players = Player.query.filter_by(match_id=match_id).order_by(Player.team_name, Player.position).all()
     teams = Team.query.filter_by(match_id=match_id).all()
     by_name = {team.team_name: team_data(team) for team in teams}
-    return jsonify(match=match_data(match), players=[player_data(player) for player in players],
+    return jsonify(match=match_data(match), players=[player_data(player, match) for player in players],
                    red_team=by_name.get(match.red_team_name), blue_team=by_name.get(match.blue_team_name))

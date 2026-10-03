@@ -9,14 +9,14 @@ def seed_cohort(db):
     for match_id in range(1, 6):
         date = datetime(2024, 1 if match_id <= 3 else 2, match_id)
         db.session.add(Match(match_id=match_id, date=date, date_source='schedule', red_team_name='A', blue_team_name='B',
-                             win_team_name='A' if match_id <= 3 else 'B'))
+                             win_team_name='A' if match_id <= 3 else 'B', game_time=1200))
         db.session.flush()
         db.session.add_all([
             Player(match_id=match_id, date=date, name='Alice', team_name='A', position='a',
-                   kda=2, part=50.5, atk_p=20, def_p=None, money_M=400.5, adc_m=7.25,
+                   kda=2, part=50.5, atk_p=20, def_p=None, money=8010, hits=145, money_M=400.5, adc_m=7.25,
                    result='1' if match_id <= 3 else '0', hero='Ahri'),
             Player(match_id=match_id, date=date, name='Bob', team_name='B', position='a',
-                   kda=4, part=70.5, atk_p=40, def_p=30, money_M=400.5, adc_m=9.25,
+                   kda=4, part=70.5, atk_p=40, def_p=30, money=8010, hits=185, money_M=400.5, adc_m=9.25,
                    result='0' if match_id <= 3 else '1', hero='Aatrox'),
             Player(match_id=match_id, date=date, name='Mid', team_name='A', position='c',
                    kda=99, part=99, atk_p=99, def_p=99, money_M=999, adc_m=99, result='1'),

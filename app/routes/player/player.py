@@ -7,6 +7,7 @@ from app.routes.common import (POSITION_LABELS, canonical_position, match_data, 
                                player_data, player_known_results, player_wins, position_arg, position_filter,
                                rounded, team_data, win_rate)
 from app.services.analytics import player_analytics
+from app.services.stat_metrics import per_minute_value
 
 player_bp = Blueprint('player', __name__, url_prefix='/player')
 
@@ -57,9 +58,12 @@ def get_player_matches(name):
         player_known_results(Player.result).label('known_results'),
         func.avg(Player.kills).label('kills'), func.avg(Player.deaths).label('deaths'),
         func.avg(Player.assists).label('assists'), func.avg(Player.money).label('money'),
-        func.avg(Player.atk_m).label('atk_m'), func.avg(Player.def_m).label('def_m'),
+        func.avg(per_minute_value(Player.atk, Match.game_time)).label('atk_m'),
+        func.avg(per_minute_value(Player.def_, Match.game_time)).label('def_m'),
+        func.count(per_minute_value(Player.atk, Match.game_time)).label('atk_m_samples'),
+        func.count(per_minute_value(Player.def_, Match.game_time)).label('def_m_samples'),
         func.count(func.distinct(Player.hero)).label('heroes'),
-    ).filter(Player.name == name).one()
+    ).select_from(Player).join(Match, Match.match_id == Player.match_id).filter(Player.name == name).one()
     positions = db.session.query(Player.position, func.count(Player.id).label('count')).filter(
         Player.name == name, Player.position.isnot(None),
     ).group_by(Player.position).order_by(func.count(Player.id).desc(), Player.position).all()
@@ -69,6 +73,7 @@ def get_player_matches(name):
     )
     ids = [player.match_id for player in pagination.items]
     matches = Match.query.filter(Match.match_id.in_(ids)).order_by(Match.date.desc(), Match.id.desc()).all() if ids else []
+    matches_by_id = {match.match_id: match for match in matches}
     teams = Team.query.filter(Team.match_id.in_(ids)).order_by(Team.match_id.desc(), Team.team_name).all() if ids else []
     rate = win_rate(aggregate.wins, aggregate.known_results)
     averages = [rounded(getattr(aggregate, metric), 1) for metric in ('kills', 'deaths', 'assists')]
@@ -76,12 +81,13 @@ def get_player_matches(name):
     position_label = POSITION_LABELS.get(canonical_position(main_position), main_position or '未知位置')
     bio = f'{name} 的主要位置是{position_label}，已收录 {aggregate.total} 场出场记录，使用过 {aggregate.heroes} 个英雄。'
     return jsonify(name=name, pic=latest.pic, team_name=latest.team_name, main_position=main_position,
-                   players=[player_data(player) for player in pagination.items],
+                   players=[player_data(player, matches_by_id[player.match_id]) for player in pagination.items],
                    matches=[match_data(match) for match in matches], teams=[team_data(team) for team in teams],
                    pagination=pagination_data(pagination), total=aggregate.total,
                    stats={'totalMatches': aggregate.total, 'winRate': rate, 'knownResults': aggregate.known_results,
                           'avgKDA': kda_text, 'avgMoney': rounded(aggregate.money, 1),
                           'avgAtkM': rounded(aggregate.atk_m, 1), 'avgDefM': rounded(aggregate.def_m, 1),
+                          'avgAtkMSamples': aggregate.atk_m_samples, 'avgDefMSamples': aggregate.def_m_samples,
                           'heroPool': aggregate.heroes, 'positions': [row.position for row in positions]}, bio=bio)
 
 

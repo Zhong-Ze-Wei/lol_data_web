@@ -40,7 +40,7 @@ COMMON_METRICS = {
     "games": metric("出场局数", "count", unit="局", definition="当前事实粒度的记录数；选手/战队各一次单局出场计一条。"),
     "matches": metric("不同单局数", "distinct_matches", unit="局", definition="COUNT(DISTINCT match_id)，不会将十名选手误计为十局。"),
     "series": metric("已知 BO 系列数", "distinct_series", unit="个", definition="不同非空 series_id 数；系列归属未知的比赛不计入，不代表完整 BO 胜负。"),
-    "avg_duration": metric("平均局时长", "avg", "game_time", "分钟", "仅使用已知时长，秒除以60；缺失时长不算零。"),
+    "avg_duration": metric("平均局时长", "avg", "game_time", "分钟", "使用比赛记录的完整时长，秒除以60；仅统计大于1秒的已知时长，缺失、零、负值和1秒占位不算零。"),
 }
 RESULT_METRICS = {
     "wins": metric("胜场", "wins", unit="局", definition="result=1 的单局出场数。"),
@@ -59,14 +59,14 @@ METRICS = {
         "avg_deaths": metric("场均死亡", "avg", "deaths", "次/局"),
         "avg_assists": metric("场均助攻", "avg", "assists", "次/局"),
         "avg_damage": metric("场均伤害", "avg", "atk", "点/局"),
-        "damage_per_min": metric("分均伤害", "avg", "atk_m", "点/分钟"),
+        "damage_per_min": metric("分均伤害", "rate_per_min", "atk", "点/分钟", "逐局总伤害×60/比赛记录的完整时长秒，再取均值；仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
         "damage_share": metric("平均伤害占比", "avg", "atk_p", "%"),
-        "damage_taken_per_min": metric("分均承伤", "avg", "def_m", "点/分钟"),
-        "gold_per_min": metric("分均经济", "avg", "money_M", "金币/分钟"),
+        "damage_taken_per_min": metric("分均承伤", "rate_per_min", "def_", "点/分钟", "逐局总承伤×60/比赛记录的完整时长秒，再取均值；仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
+        "gold_per_min": metric("分均经济", "rate_per_min", "money", "金币/分钟", "逐局总经济×60/比赛记录的完整时长秒，再取均值；包含完整分秒，仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
         "avg_gold": metric("场均经济", "avg", "money", "金币/局"),
-        "cs_per_min": metric("分均补刀", "avg", "adc_m", "刀/分钟"),
+        "cs_per_min": metric("分均补刀", "rate_per_min", "hits", "刀/分钟", "逐局总补刀×60/比赛记录的完整时长秒，再取均值；仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
         "participation": metric("平均参团率", "avg", "part", "%"),
-        "wards_per_min": metric("分均插眼", "avg", "wp_m", "个/分钟"),
+        "wards_per_min": metric("分均插眼", "avg", "wp_m", "个/分钟", "平均来源分均插眼，来源仅有整数精度且缺少可信插眼总量，无法按完整分秒重算；0不代表整局没有插眼，缺失值不算零。"),
         "mvp_count": metric("MVP 次数", "mvp_count", "mvp", "次"),
     },
     "team": {
@@ -76,8 +76,8 @@ METRICS = {
         "avg_assists": metric("场均助攻", "avg", "assist", "次/局"),
         "avg_damage": metric("场均伤害", "avg", "attack", "点/局"),
         "avg_gold": metric("场均经济", "avg", "money", "金币/局"),
-        "gold_per_min": metric("分均经济", "rate_per_min", "money", "金币/分钟", "逐局总经济×60/已知时长秒，再取均值；缺失/无效时长的局不计入。"),
-        "damage_per_min": metric("分均伤害", "rate_per_min", "attack", "点/分钟", "逐局总伤害×60/已知时长秒，再取均值；缺失/无效时长的局不计入。"),
+        "gold_per_min": metric("分均经济", "rate_per_min", "money", "金币/分钟", "逐局总经济×60/比赛记录的完整时长秒，再取均值；仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
+        "damage_per_min": metric("分均伤害", "rate_per_min", "attack", "点/分钟", "逐局总伤害×60/比赛记录的完整时长秒，再取均值；仅计非负总量且时长大于1秒的样本，缺失和1秒占位不算零。"),
         "avg_towers": metric("场均推塔", "avg", "tower", "座/局"),
         "avg_dragons": metric("场均小龙", "avg", "small_dargon", "条/局"),
         "avg_barons": metric("场均大龙", "avg", "big_dargon", "条/局"),
@@ -272,6 +272,8 @@ def entity_catalog():
 
 def matching_entities(term, kind, catalog):
     names = catalog[kind]
+    if term in names:
+        return [term]
     normalized = normalize_name(term)
     exact = [name for name in names if normalize_name(name) == normalized]
     if exact:

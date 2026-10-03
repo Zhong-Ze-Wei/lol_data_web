@@ -9,6 +9,7 @@ from app.models.match import Match
 from app.models.player import Player
 from app.models.team import Team
 from app.services.query_semantics import DIMENSIONS, GRAINS, METRICS, POSITIONS
+from app.services.stat_metrics import per_minute_value
 
 
 def count_when(condition):
@@ -84,6 +85,8 @@ def result_expressions(fact):
 def metric_expression(key, definition, fact, matches):
     operation, physical = definition["operation"], definition["column"]
     column = fact.c[physical] if physical else None
+    if key == "avg_duration":
+        column = case((matches.c.game_time > 1, matches.c.game_time))
     sample = func.count(column) if physical else func.count()
     if operation == "count":
         expression = func.count()
@@ -103,9 +106,9 @@ def metric_expression(key, definition, fact, matches):
         expression = numerator * 1.0 / func.nullif(denominator, 0)
         sample = count_when(complete)
     elif operation == "rate_per_min":
-        valid = and_(column.is_not(None), fact.c.game_time.is_not(None), fact.c.game_time > 0)
-        expression = func.avg(case((valid, column * 60.0 / fact.c.game_time)))
-        sample = count_when(valid)
+        per_minute = per_minute_value(column, matches.c.game_time)
+        expression = func.avg(per_minute)
+        sample = func.count(per_minute)
     elif operation in {"wins", "losses", "known_results", "win_rate"}:
         known, win, loss = result_expressions(fact)
         sample = count_when(known)
@@ -192,7 +195,14 @@ def result_columns(plan):
     columns.append({"key": "sample_size", "label": "样本出场数" if plan["subject"] != "match" else "样本局数", "type": "number", "unit": "次" if plan["subject"] != "match" else "局", "definition": GRAINS[plan["subject"]]})
     for key in plan["metrics"]:
         if METRICS[plan["subject"]][key]["operation"] in {"avg", "aggregate_kda", "binary_rate", "rate_per_min", "win_rate"}:
-            definition = "胜负已知出场数，胜率分母；未知胜负不计入。" if key == "win_rate" else "实际参与该指标计算的非空样本数。"
+            if key == "win_rate":
+                definition = "胜负已知出场数，胜率分母；未知胜负不计入。"
+            elif METRICS[plan["subject"]][key]["operation"] == "rate_per_min":
+                definition = "总量已知且非负、比赛时长大于1秒的出场数；每项指标独立计数。"
+            elif key == "avg_duration":
+                definition = "比赛记录时长大于1秒的出场数；缺失和1秒占位不计入。"
+            else:
+                definition = "实际参与该指标计算的非空样本数。"
             columns.append({"key": f"{key}_samples", "label": f"{METRICS[plan['subject']][key]['label']}有效样本", "type": "number", "unit": "次", "definition": definition})
     if plan["per_group_top_n"]:
         columns.append({"key": "group_rank", "label": "组内排名", "type": "number", "unit": "", "definition": "按已选指标在当前分组内排序，同值按实体名称稳定排列。"})
