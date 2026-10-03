@@ -570,6 +570,110 @@ def test_business_ambiguity_and_missing_metrics_do_not_call_model(client, ai):
     ai.assert_not_called()
 
 
+def test_strength_clarification_keeps_full_scope_and_explicit_sample_limit(client, ai):
+    question = "仅2014至2015年已确认赛程且已核验的LPL比赛，对比Faker和Chovy，至少5局只看前三名，谁最强？"
+    response = client.post("/api/ai/query", json={"prompt": question})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["status"] == "needs_clarification"
+    assert result["question"] == question
+    assert result["context"] is None
+    choices = result["clarification"]["choices"]
+    assert [choice["label"] for choice in choices] == ["中单平均 KDA", "ADC 分均伤害", "战队胜率"]
+    for choice in choices:
+        assert choice["prompt"].startswith(question + "\n补充比较口径：")
+        assert "至少10" not in choice["prompt"]
+        assert "前10" not in choice["prompt"]
+    ai.assert_not_called()
+
+
+def test_strength_clarification_selection_transports_scope_to_the_query(client, ai, sample_data):
+    question = "仅2024年已确认赛程且已核验的LCK比赛，对比Faker和Chovy，至少1局只看前三名，谁最强？"
+    clarification = client.post("/api/ai/query", json={"prompt": question}).json["result"]
+    ai.assert_not_called()
+    selected = clarification["clarification"]["choices"][0]["prompt"]
+    scoped_plan = plan(
+        metrics=["avg_kda"], filters={"player": ["Faker", "Chovy"], "position": ["c"],
+                                   "date_start": "2024-01-01", "date_end": "2024-12-31",
+                                   "tournament_contains": ["LCK"], "verified_only": True},
+        min_games=1, limit=3, order_by="avg_kda",
+    )
+    ai.side_effect = [json.dumps(scoped_plan), "已核验赛程样本中两名中单的平均单局KDA均为10。"]
+    response = client.post("/api/ai/query", json={"prompt": selected})
+    assert response.status_code == 200
+    planning_input = json.loads(ai.call_args_list[0].args[1])
+    assert planning_input["question"] == selected
+    assert question in planning_input["question"]
+    assert planning_input["context"] is None
+    result = response.json["result"]
+    assert result["status"] == "ok"
+    assert result["context"]["plan"] == scoped_plan
+    assert {row["player"] for row in result["data"]} == {"Faker", "Chovy"}
+    assert all(row["sample_size"] == 1 and row["avg_kda_samples"] == 1 and row["avg_kda"] == 10 for row in result["data"])
+    assert result["evidence"]["requested_date_start"] == "2024-01-01"
+    assert result["evidence"]["requested_date_end"] == "2024-12-31"
+    assert result["evidence"]["verified_matches"] == 1
+    assert result["evidence"]["unverified_matches"] == 0
+    assert ai.call_count == 2
+
+
+def test_strength_clarification_keeps_existing_context(client, ai):
+    previous = plan(metrics=["avg_kda"], filters={"player": ["Faker"], "date_start": "2014-01-01",
+                                               "date_end": "2014-12-31", "verified_only": True}, order_by="avg_kda")
+    context = {"plan": previous}
+    question = "保持上述范围，谁最强？"
+    response = client.post("/api/ai/query", json={"prompt": question, "context": context})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["context"] == context
+    assert all(choice["prompt"].startswith(question + "\n") for choice in result["clarification"]["choices"])
+    ai.assert_not_called()
+
+
+def test_strength_clarification_at_input_limit_requires_editing_without_truncating(client, ai):
+    original = "仅2014年已确认赛程且已核验的LPL比赛，谁最强？"
+    question = original + "。" * (1000 - len(original))
+    context = {"plan": plan(filters={"team": ["T1"]})}
+    response = client.post("/api/ai/query", json={"prompt": question, "context": context})
+    assert response.status_code == 200
+    result = response.json["result"]
+    assert result["status"] == "needs_clarification"
+    assert result["question"] == question
+    assert result["context"] == context
+    assert result["clarification"]["choices"] == []
+    assert "1000字" in result["answer"]
+    assert "保留原有时间、赛事、实体及核验条件" in result["answer"]
+    ai.assert_not_called()
+
+
+def test_strength_clarification_at_last_fitting_length_can_be_submitted(client, ai, sample_data):
+    original = "仅2024年已确认赛程且已核验的LCK比赛，谁最强？"
+    question = original + "。" * (975 - len(original))
+    response = client.post("/api/ai/query", json={"prompt": question})
+    assert response.status_code == 200
+    choices = response.json["result"]["clarification"]["choices"]
+    assert len(choices) == 3
+    assert max(len(choice["prompt"]) for choice in choices) == 1000
+    ai.assert_not_called()
+    selected = next(choice["prompt"] for choice in choices if choice["label"] == "战队胜率")
+    scoped_plan = plan(subject="team", dimensions=["team"], metrics=["win_rate"],
+                       filters={"date_start": "2024-01-01", "date_end": "2024-12-31",
+                                "tournament_contains": ["LCK"], "verified_only": True}, order_by="win_rate")
+    ai.side_effect = [json.dumps(scoped_plan), "已核验范围有一场已知胜负。"]
+    queried = client.post("/api/ai/query", json={"prompt": selected})
+    assert queried.status_code == 200
+    assert json.loads(ai.call_args_list[0].args[1])["question"] == selected
+    assert queried.json["result"]["context"]["plan"] == scoped_plan
+    assert ai.call_count == 2
+
+
+def test_strength_clarification_with_unsupported_metrics_stays_unsupported(client, ai):
+    response = client.post("/api/ai/query", json={"prompt": "仅2014年已核验的LPL比赛，哪个版本谁最强？"})
+    assert response.status_code == 200
+    assert response.json["result"]["status"] == "unsupported"
+    ai.assert_not_called()
+
+
 def test_second_model_failure_keeps_actual_data_and_metadata(client, ai, sample_data):
     ai.side_effect = [json.dumps(plan(metrics=["avg_kda"], filters={"player": ["Faker"]}, order_by="avg_kda")), AIUnavailable("network unavailable")]
     response = client.post("/api/ai/query", json={"prompt": "Faker平均KDA"})

@@ -191,6 +191,17 @@ def clarify_result(result, clarification):
     return result
 
 
+def strength_clarification(user_prompt):
+    choices = [
+        {"label": "中单平均 KDA", "prompt": user_prompt + "\n补充比较口径：同为中单，按平均单局KDA比较。"},
+        {"label": "ADC 分均伤害", "prompt": user_prompt + "\n补充比较口径：同为ADC，按分均伤害比较。"},
+        {"label": "战队胜率", "prompt": user_prompt + "\n补充比较口径：按战队胜率比较，分母只用已知胜负。"},
+    ]
+    if any(len(choice["prompt"]) > 1000 for choice in choices):
+        return {"question": "补充比较口径后会超过1000字，请先精简原问题并明确指标和位置，保留原有时间、赛事、实体及核验条件。", "choices": []}
+    return {"question": "请明确比较指标和位置；样本与口径不同，不能直接给出绝对实力排名。", "choices": choices}
+
+
 def query_assumptions(plan, evidence, rows):
     assumptions = [
         f"统计粒度：{GRAINS[plan['subject']]}；比较的是已收录样本，不代表赛事全量或绝对实力。",
@@ -278,11 +289,7 @@ def run_ai_query(user_prompt, user_name="", request_id=None, context=None):
         result.update(status="unsupported", answer=reason)
         return result
     if any(word in user_prompt for word in ["最强", "表现最好", "最厉害", "综合实力"]) and not any(word.lower() in user_prompt.lower() for word in ["kda", "胜率", "伤害", "参团", "分均", "击杀"]):
-        return clarify_result(result, {"question": "请明确比较指标和位置；样本与口径不同，不能直接给出绝对实力排名。", "choices": [
-            {"label": "中单平均 KDA", "prompt": "比较同为中单、至少10次出场选手的平均单局KDA前10名"},
-            {"label": "ADC 分均伤害", "prompt": "比较同为ADC、至少10次出场选手的分均伤害前10名"},
-            {"label": "战队胜率", "prompt": "比较至少10次出场战队的胜率前10名，排除未知胜负分母"},
-        ]})
+        return clarify_result(result, strength_clarification(user_prompt))
     if not current_app.config["AI_API_KEY"]:
         raise AIUnavailable("尚未配置 AI 密钥；可继续使用数据查询和分析页面")
     catalog = entity_catalog()

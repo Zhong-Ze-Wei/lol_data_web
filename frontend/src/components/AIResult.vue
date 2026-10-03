@@ -37,7 +37,10 @@ const range = computed(() => evidenceRange(evidence.value));
       class="ai-clarification"
     >
       <h3>{{ result.clarification.question }}</h3>
-      <p>选择一个条件填入问题，确认后再发送。</p>
+      <p v-if="result.clarification.choices.length">
+        选择一个条件填入问题，确认后再发送。
+      </p>
+      <p v-else>请在上方编辑问题后重新发送。</p>
       <div class="ai-suggestions">
         <button
           v-for="choice in result.clarification.choices"
