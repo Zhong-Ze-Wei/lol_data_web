@@ -1,43 +1,49 @@
-# 这段代码是 SQLAlchemy 模型定义，在 Flask 中它的作用主要包括 数据库表结构定义 + ORM 映射
-
 from app import db
+
+
 class Player(db.Model):
+    """选手的一次出场；百分比以 0–100 保存，分均指标保留小数。"""
+
     __tablename__ = 'players'
+    __table_args__ = (
+        db.UniqueConstraint('match_id', 'team_name', 'position', name='uq_player_match_team_position'),
+        db.Index('ix_player_name_date_id', 'name', 'date', 'id'),
+        db.Index('ix_player_position_date', 'position', 'date'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.DateTime, nullable=True)  # 比赛日期
-    name = db.Column(db.String(100), nullable=True)  # 选手名
-    pic = db.Column(db.String(255), nullable=True)  # 选手图片URL
-    hero = db.Column(db.String(255), nullable=True)  # 英雄名
-    hero_lv = db.Column(db.Integer, nullable=True)  # 英雄等级
-    kda = db.Column(db.Float, nullable=True)  # KDA（转换为浮动数值）
-    kills = db.Column(db.Integer, nullable=True)  # 击杀数
-    deaths = db.Column(db.Integer, nullable=True)  # 死亡数
-    assists = db.Column(db.Integer, nullable=True)  # 助攻数
-    part = db.Column(db.String(20), nullable=True)  # 参团率
-    atk = db.Column(db.Integer, nullable=True)  # 总输出
-    atk_p = db.Column(db.Integer, nullable=True)  # 输出占比
-    atk_m = db.Column(db.Integer, nullable=True)  # 分均输出
-    def_ = db.Column(db.Integer, nullable=True)  # 承伤总量
-    def_p = db.Column(db.Integer, nullable=True)  # 承伤占比
-    def_m = db.Column(db.Integer, nullable=True)  # 分均承伤
-    adc_m = db.Column(db.Integer, nullable=True)  # 分均补刀
-    money = db.Column(db.Integer, nullable=True)  # 总经济
-    money_M = db.Column(db.Integer, nullable=True)  # 分钟经济
-    wp_m = db.Column(db.Integer, nullable=True)  # 分均插眼（待确认）
-    hits = db.Column(db.Integer, nullable=True)  # 补刀数
-    mvp = db.Column(db.Integer, nullable=True)  # 是否MVP（1/0）
-    beiguo = db.Column(db.String(100), nullable=True)  # 是否背锅（1/0）
-    team_name = db.Column(db.String(100), nullable=True)  # 战队名称
-    position = db.Column(db.String(100), nullable=True)  # 选手位置（上单/打野等）
-    game_time = db.Column(db.Integer, nullable=True)  # 比赛时间（秒）
-    result = db.Column(db.String(10), nullable=True)  # 比赛结果（胜/负）
-    #match_id = db.Column(db.Integer, db.ForeignKey('matches.match_id'))  # 定义外键约束
-    match_id = db.Column(db.Integer)
+    date = db.Column(db.DateTime, nullable=True, index=True)
+    name = db.Column(db.String(100), nullable=True, index=True)
+    pic = db.Column(db.String(255), nullable=True)
+    hero = db.Column(db.String(255), nullable=True, index=True)
+    hero_lv = db.Column(db.Integer, nullable=True)
+    kda = db.Column(db.Float, nullable=True)
+    kills = db.Column(db.Integer, nullable=True)
+    deaths = db.Column(db.Integer, nullable=True)
+    assists = db.Column(db.Integer, nullable=True)
+    part = db.Column(db.Float, nullable=True)
+    atk = db.Column(db.Integer, nullable=True)
+    atk_p = db.Column(db.Float, nullable=True)
+    atk_m = db.Column(db.Float, nullable=True)
+    def_ = db.Column(db.Integer, nullable=True)
+    def_p = db.Column(db.Float, nullable=True)
+    def_m = db.Column(db.Float, nullable=True)
+    adc_m = db.Column(db.Float, nullable=True)
+    money = db.Column(db.Integer, nullable=True)
+    money_M = db.Column(db.Float, nullable=True)
+    wp_m = db.Column(db.Float, nullable=True)
+    hits = db.Column(db.Integer, nullable=True)
+    mvp = db.Column(db.Integer, nullable=True)
+    beiguo = db.Column(db.String(100), nullable=True)
+    team_name = db.Column(db.String(100), nullable=True, index=True)
+    position = db.Column(db.String(100), nullable=True, index=True)
+    game_time = db.Column(db.Integer, nullable=True)
+    result = db.Column(db.String(10), nullable=True)
+    match_id = db.Column(db.Integer, db.ForeignKey('matches.match_id'), nullable=False, index=True)
 
     def save(self):
         db.session.add(self)
         db.session.commit()
 
     def __repr__(self):
-        return f'<Player {self.name}>'
+        return f'<Player {self.name} in {self.match_id}>'

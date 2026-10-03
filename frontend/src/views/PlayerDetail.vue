@@ -1,314 +1,273 @@
-<template>
-  <div class="player-detail-container" v-loading="loading">
-    <el-page-header @back="goBack"></el-page-header>
+<script setup>
+import { computed, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { request } from "../services/api.js";
+import { useResource } from "../composables/useResource.js";
+import {
+  number,
+  percent,
+  position,
+  date,
+  resultLabel,
+  detailLink,
+} from "../utils/format.js";
+import { radarOption, trendOption } from "../utils/charts.js";
+import ResourceState from "../components/ResourceState.vue";
+import Chart from "../components/Chart.vue";
+import Pagination from "../components/Pagination.vue";
 
-    <!-- 选手说明 -->
-    <div class="profile-card" v-if="!loading && playerData">
-      <div class="profile-header">选手信息</div>
-      <div class="profile-content">
-        <div class="profile-left">
-          <h1 class="player-name">{{ playerData.name }} <el-tag size="small" type="info">{{ getPositionName(playerData.main_position) }}</el-tag></h1>
-          <p class="player-bio">
-            {{ playerData.name }}是一位职业{{ getPositionName(playerData.main_position) }}选手，职业生涯共参加{{ playerData.stats.totalMatches }}场比赛，胜率{{ playerData.stats.winRate }}%。<br />
-            场均KDA为{{ playerData.stats.avgKDA }}，场均经济{{ playerData.stats.avgMoney }}，场均输出{{ playerData.stats.avgAtkM }}，场均承伤{{ playerData.stats.avgDefM }}。<br />
-            共使用过{{ playerData.stats.heroPool || 0 }}个不同英雄。
-          </p>
-        </div>
-        <el-avatar :size="120" :src="playerData.pic" fit="cover" class="player-avatar"></el-avatar>
-      </div>
-
-      <!-- 图表容器 -->
-      <div class="charts-container">
-        <div ref="kdaChart" class="chart kda-chart"></div>
-        <div ref="winRateChart" class="chart pie-chart"></div>
-      </div>
-    </div>
-
-    <!-- 比赛记录表 -->
-    <div class="stat-section" v-if="!loading && players.length > 0">
-      <h3 class="section-title">比赛记录（按时间顺序）</h3>
-      <el-table :data="players" style="width: 100%" stripe>
-        <el-table-column prop="date" label="比赛日期" width="120" sortable></el-table-column>
-        <el-table-column prop="hero" label="英雄" width="120">
-          <template slot-scope="scope">
-            <div class="hero-cell">
-              <img :src="scope.row.pic" alt="英雄图片" class="hero-image" v-if="scope.row.pic">
-              <span>{{ scope.row.hero }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="kda" label="KDA" width="80"></el-table-column>
-        <el-table-column prop="kills" label="击杀" width="70"></el-table-column>
-        <el-table-column prop="deaths" label="死亡" width="70"></el-table-column>
-        <el-table-column prop="assists" label="助攻" width="70"></el-table-column>
-        <el-table-column prop="money" label="经济" width="80"></el-table-column>
-        <el-table-column prop="position" label="位置" width="80">
-          <template slot-scope="scope">
-            {{ getPositionName(scope.row.position) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="结果" width="80">
-          <template slot-scope="scope">
-            <el-tag :type="scope.row.result === '1' ? 'success' : 'danger'">
-              {{ scope.row.result === '1' ? '胜' : '负' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="详情" width="80" fixed="right">
-          <template slot-scope="scope">
-            <el-button size="mini" type="primary" @click="viewMatchDetail(scope.row.match_id)">查看</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <el-empty v-else-if="!loading" description="没有找到该选手参与的比赛"></el-empty>
-  </div>
-</template>
-
-<script>
-import * as echarts from 'echarts';
-
-export default {
-  name: 'PlayerDetail',
-  data() {
-    return {
-      playerName: '',
-      playerData: null,
-      players: [],
-      loading: true,
-      kdaChart: null,
-      winRateChart: null
-    };
-  },
-  mounted() {
-    this.playerName = this.$route.params.name;
-    this.fetchPlayerData();
-  },
-  methods: {
-    getPositionName(position) {
-      const positionMapping = {
-        'a': '上单',
-        'b': '打野',
-        'c': '中单',
-        'd': 'ADC',
-        'e': '辅助'
-      };
-      return positionMapping[position] || position;
-    },
-    async fetchPlayerData() {
-      this.loading = true;
-      try {
-        const response = await fetch(`/player/api/${this.playerName}`);
-        const data = await response.json();
-        if (data.error) {
-          this.$message.error(data.error);
-          return;
-        }
-        this.playerData = data;
-        this.players = data.players || [];
-        this.$nextTick(() => {
-          setTimeout(() => this.initCharts(), 50);
-        });
-      } catch (error) {
-        this.$message.error('获取选手数据失败');
-        console.error(error);
-      } finally {
-        this.loading = false;
-      }
-    },
-    groupByQuarter() {
-      const grouped = {};
-      this.players.forEach(p => {
-        const d = new Date(p.date);
-        const year = d.getFullYear();
-        const quarter = Math.floor(d.getMonth() / 3) + 1;
-        const key = `${year} Q${quarter}`;
-        const kda = ((p.kills || 0) + (p.assists || 0)) / Math.max(1, p.deaths || 0);
-        if (!grouped[key]) {
-          grouped[key] = { totalKDA: 0, count: 0 };
-        }
-        grouped[key].totalKDA += kda;
-        grouped[key].count += 1;
-      });
-      const labels = Object.keys(grouped).sort();
-      const values = labels.map(k => +(grouped[k].totalKDA / grouped[k].count).toFixed(2));
-      return { labels, values };
-    },
-    initCharts() {
-      const { labels, values } = this.groupByQuarter();
-      const minVal = Math.min(...values);
-      const maxVal = Math.max(...values);
-
-      this.kdaChart = echarts.init(this.$refs.kdaChart);
-      this.kdaChart.setOption({
-        tooltip: { trigger: 'axis' },
-        xAxis: { type: 'category', data: labels },
-        yAxis: { type: 'value' },
-        visualMap: {
-          show: false,
-          min: minVal,
-          max: maxVal,
-          inRange: {
-            color: ['#1e90ff', '#ff4500']
-          }
-        },
-        series: [{
-          data: values,
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 12,
-          lineStyle: { width: 4 },
-          itemStyle: { color: '#409EFF' }
-        }]
-      });
-
-      const totalMatches = this.playerData.stats.totalMatches || 0;
-      const winRate = this.playerData.stats.winRate || 0;
-      const winCount = Math.round(totalMatches * (winRate / 100));
-      const loseCount = totalMatches - winCount;
-      this.winRateChart = echarts.init(this.$refs.winRateChart);
-      this.winRateChart.setOption({
-        tooltip: { trigger: 'item' },
-        series: [{
-          type: 'pie',
-          radius: '70%',
-          data: [
-            { value: winCount, name: '胜利', itemStyle: { color: '#67C23A' } },
-            { value: loseCount, name: '失败', itemStyle: { color: '#F56C6C' } }
-          ],
-          label: { show: true, formatter: '{b}: {c} ({d}%)' }
-        }]
-      });
-    },
-    viewMatchDetail(matchId) {
-      this.$router.push(`/match/${matchId}`);
-    },
-    goBack() {
-      this.$router.go(-1);
-    }
-  },
-  beforeDestroy() {
-    if (this.kdaChart) this.kdaChart.dispose();
-    if (this.winRateChart) this.winRateChart.dispose();
-  }
-};
+const route = useRoute();
+const router = useRouter();
+const name = computed(() => route.params.name);
+const resource = useResource(
+  (signal) =>
+    request(`/player/api/${encodeURIComponent(name.value)}`, {
+      params: { page: route.query.page },
+      signal,
+    }),
+  [name, () => route.query.page],
+);
+const analytics = useResource(
+  (signal) =>
+    request(`/player/api/${encodeURIComponent(name.value)}/analytics`, {
+      signal,
+    }),
+  [name],
+);
+const trendMetric = ref("kda");
+const trendLabel = computed(
+  () =>
+    ({
+      kda: "KDA",
+      atk_p: "伤害占比（%）",
+      part: "参团率（%）",
+      money_M: "分均经济",
+      win_rate: "胜率（%）",
+    })[trendMetric.value],
+);
+const radarAxes = computed(() =>
+  (analytics.data.value?.axes || []).filter(
+    (axis) =>
+      analytics.data.value.percentiles[axis.key] !== null &&
+      analytics.data.value.percentiles[axis.key] !== undefined,
+  ),
+);
+const chart = computed(
+  () =>
+    analytics.data.value &&
+    radarOption(radarAxes.value, [
+      { ...analytics.data.value, name: name.value },
+    ]),
+);
+const records = computed(() => resource.data.value?.players || []);
+function page(value) {
+  router.push({ path: route.path, query: { ...route.query, page: value } });
+}
 </script>
-
-<style scoped>
-.player-detail-container {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.profile-card {
-  margin-top: 25px;
-  background: linear-gradient(120deg, #ffffff, #f8f9ff);
-  border-radius: 15px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-}
-
-.profile-header {
-  background: linear-gradient(90deg, #4361ee, #3a0ca3);
-  color: #fff;
-  padding: 12px 20px;
-  font-weight: bold;
-  font-size: 16px;
-}
-
-.profile-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 25px;
-}
-
-.profile-left {
-  max-width: 75%;
-}
-
-.player-name {
-  font-size: 28px;
-  font-weight: bold;
-  margin-bottom: 10px;
-}
-
-.player-bio {
-  margin-top: 12px;
-  line-height: 1.6;
-  color: #555;
-  white-space: pre-line;
-}
-
-.player-avatar {
-  border: 3px solid #409EFF;
-  margin-left: 20px;
-  align-self: flex-start;
-  flex-shrink: 0;
-}
-
-/* 图表容器：水平排列，宽度100% */
-.charts-container {
-  display: flex;
-  width: 100%;
-  padding: 20px 25px;
-  gap: 30px;
-  box-sizing: border-box;
-  justify-content: space-between;
-}
-
-/* 折线图占70%宽 */
-.chart.kda-chart {
-  flex: 0 0 65%;
-  height: 260px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  background: #fff;
-}
-
-/* 饼图占30%宽，居中 */
-.chart.pie-chart {
-  flex: 0 0 30%;
-  height: 260px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  background: #fff;
-}
-
-/* 比赛记录表格 */
-.stat-section {
-  background: #fff;
-  padding: 25px;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  margin-top: 20px;
-}
-
-/* 响应式调整 */
-@media (max-width: 960px) {
-  .profile-content {
-    flex-direction: column;
-  }
-  .profile-left {
-    max-width: 100%;
-  }
-  .player-avatar {
-    margin-left: 0;
-    margin-top: 15px;
-    align-self: center;
-  }
-  .charts-container {
-    flex-direction: column;
-    padding: 0 15px 15px;
-  }
-  .chart.kda-chart, .chart.pie-chart {
-    flex: none;
-    width: 100%;
-    height: 220px;
-    margin-bottom: 15px;
-  }
-}
-</style>
+<template>
+  <RouterLink class="back-link" to="/player">← 选手档案</RouterLink>
+  <header class="page-heading">
+    <p class="eyebrow">
+      PLAYER PROFILE / {{ position(resource.data.value?.main_position) }}
+    </p>
+    <h1>{{ name }}</h1>
+    <p>已收录比赛中的出场表现与英雄使用情况。</p>
+  </header>
+  <ResourceState
+    :loading="resource.loading.value"
+    :error="resource.error.value"
+    @retry="resource.reload"
+    ><template v-if="resource.data.value"
+      ><div class="metric-grid">
+        <div
+          v-for="[key, label, mode] in [
+            ['totalMatches', '出场样本', 'number'],
+            ['winRate', '样本胜率', 'percent'],
+            ['avgKDA', '场均击杀 / 死亡 / 助攻', 'text'],
+            ['heroPool', '使用英雄', 'number'],
+          ]"
+          :key="key"
+          class="metric"
+        >
+          <span>{{ label }}</span
+          ><strong>{{
+            mode === "percent"
+              ? percent(resource.data.value.stats[key])
+              : mode === "text"
+                ? resource.data.value.stats[key]
+                : number(resource.data.value.stats[key])
+          }}</strong>
+        </div>
+      </div>
+      <div class="analysis-grid">
+        <section class="panel">
+          <header class="panel-header">
+            <div>
+              <p class="eyebrow">POSITION PERCENTILES</p>
+              <h2>同位置表现轮廓</h2>
+            </div>
+          </header>
+          <ResourceState
+            :loading="analytics.loading.value"
+            :error="analytics.error.value"
+            :empty="!analytics.data.value?.matches_count"
+            @retry="analytics.reload"
+            ><Chart
+              v-if="chart && radarAxes.length >= 3"
+              :option="chart"
+              :label="`${name} 同位置百分位雷达图`"
+            />
+            <div v-if="radarAxes.length < 3" class="state-box">
+              有效样本不足或共同指标缺失，暂不绘制雷达。
+            </div>
+            <p class="chart-note">
+              同位置
+              {{ analytics.data.value?.cohort_size }}
+              位选手的指标百分位。承伤表示赛场职责；各轴独立，不能相加作为综合实力。
+            </p></ResourceState
+          >
+        </section>
+        <section class="panel">
+          <header class="panel-header">
+            <div>
+              <p class="eyebrow">MONTHLY TREND</p>
+              <h2>按月观察</h2>
+            </div>
+            <label
+              ><span class="sr-only">趋势指标</span
+              ><select v-model="trendMetric">
+                <option value="kda">KDA</option>
+                <option value="part">参团率</option>
+                <option value="atk_p">伤害占比</option>
+                <option value="money_M">分均经济</option>
+                <option value="win_rate">胜率</option>
+              </select></label
+            >
+          </header>
+          <ResourceState
+            :loading="analytics.loading.value"
+            :error="analytics.error.value"
+            :empty="!analytics.data.value?.monthly.length"
+            @retry="analytics.reload"
+            ><Chart
+              :option="
+                trendOption(
+                  analytics.data.value.monthly,
+                  trendMetric,
+                  trendLabel,
+                )
+              "
+              :label="`${name} 月度${trendLabel}`"
+            />
+            <p class="chart-note">
+              悬停查看每月原始指标和比赛样本数。历史记录按源数据更新时间分月。
+            </p></ResourceState
+          >
+        </section>
+      </div>
+      <section class="panel section-space">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">CHAMPION POOL</p>
+            <h2>英雄使用</h2>
+          </div>
+        </header>
+        <ResourceState
+          :loading="analytics.loading.value"
+          :error="analytics.error.value"
+          :empty="!analytics.data.value?.heroes.length"
+          @retry="analytics.reload"
+          ><div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>英雄</th>
+                  <th class="numeric">出场样本</th>
+                  <th class="numeric">胜率</th>
+                  <th class="numeric">KDA</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="hero in analytics.data.value.heroes"
+                  :key="hero.hero"
+                >
+                  <td>
+                    <RouterLink :to="detailLink('hero', hero.hero)">{{
+                      hero.hero
+                    }}</RouterLink>
+                  </td>
+                  <td class="numeric">{{ number(hero.matches_count) }}</td>
+                  <td class="numeric">{{ percent(hero.win_rate) }}</td>
+                  <td class="numeric">{{ number(hero.kda, 2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div></ResourceState
+        >
+      </section>
+      <section class="panel section-space">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">APPEARANCE LOG</p>
+            <h2>出场记录</h2>
+          </div>
+          <span class="tag"
+            >{{ number(resource.data.value.stats.totalMatches) }} 场</span
+          >
+        </header>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>记录日期</th>
+                <th>英雄</th>
+                <th>位置</th>
+                <th>结果</th>
+                <th class="numeric">击杀 / 死亡 / 助攻</th>
+                <th class="numeric">分均伤害</th>
+                <th class="numeric">总经济</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="record in records" :key="record.match_id">
+                <td class="muted">{{ date(record.date) }}</td>
+                <td>
+                  <RouterLink
+                    v-if="record.hero"
+                    :to="detailLink('hero', record.hero)"
+                    >{{ record.hero }}</RouterLink
+                  >
+                  <span v-else>—</span>
+                </td>
+                <td>{{ position(record.position) }}</td>
+                <td
+                  :class="
+                    resultLabel(record.result) === '胜' ? 'positive' : 'muted'
+                  "
+                >
+                  {{ resultLabel(record.result) }}
+                </td>
+                <td class="numeric">
+                  {{ number(record.kills) }} / {{ number(record.deaths) }} /
+                  {{ number(record.assists) }}
+                </td>
+                <td class="numeric">{{ number(record.atk_m) }}</td>
+                <td class="numeric">{{ number(record.money) }}</td>
+                <td>
+                  <RouterLink
+                    class="row-arrow"
+                    :to="detailLink('match', record.match_id)"
+                    :aria-label="`查看比赛 ${record.match_id}`"
+                    >↗</RouterLink
+                  >
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <Pagination :pagination="resource.data.value.pagination" @page="page" />
+      </section> </template
+  ></ResourceState>
+</template>

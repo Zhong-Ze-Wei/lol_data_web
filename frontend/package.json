@@ -1,27 +1,31 @@
 {
   "name": "lol-data-frontend",
-  "version": "1.0.0",
-  "description": "LOL职业赛事数据平台前端",
-  "author": "Your Name",
+  "version": "2.0.0",
   "private": true,
+  "type": "module",
+  "description": "英雄联盟赛事数据研究台",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
   "scripts": {
-    "serve": "vue-cli-service serve",
-    "build": "vue-cli-service build",
-    "lint": "vue-cli-service lint"
+    "dev": "vite --host 127.0.0.1",
+    "serve": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run"
   },
   "dependencies": {
-    "echarts": "^5.6.0",
-    "element-ui": "^2.15.6",
-    "vue": "^2.6.14",
-    "vue-router": "^3.5.4"
+    "dompurify": "3.4.16",
+    "echarts": "6.1.0",
+    "marked": "18.0.14",
+    "vue": "3.5.43",
+    "vue-router": "4.6.4"
   },
   "devDependencies": {
-    "@vue/cli-service": "^5.0.0",
-    "vue-template-compiler": "^2.6.14"
-  },
-  "browserslist": [
-    "> 1%",
-    "last 2 versions",
-    "not dead"
-  ]
+    "@vitejs/plugin-vue": "6.0.9",
+    "jsdom": "26.1.0",
+    "prettier": "3.9.9",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
 }

@@ -1,38 +1,29 @@
-# app/routes/ai/ai.py
 import logging
-from flask import Blueprint, request, jsonify
-from app.services.ai_assistant import run_ai_query
 
-# 配置日志
-logger = logging.getLogger(__name__)
+from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.services.ai_assistant import AIUnavailable, InvalidQuery, run_ai_query
 
 ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
+logger = logging.getLogger(__name__)
 
 
-@ai_bp.route("/query", methods=["POST"])
+@ai_bp.post("/query")
 def query_ai():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="请提供 JSON 格式的请求"), 400
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
+        return jsonify(error="请输入 1–1000 字的问题"), 400
+    prompt = prompt.strip()
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "无效的请求数据，请提供JSON格式的请求体"}), 400
-
-        prompt = data.get("prompt", "")
-        if not prompt:
-            return jsonify({"error": "请提供查询内容"}), 400
-            
-        user_id = data.get("user_id", "")
-        user_name = f"用户{user_id}" if user_id else "未知用户"
-
-        result = run_ai_query(prompt, user_name=user_name)
-        return jsonify({"result": result})
-    except Exception as e:
-        error_msg = f"处理AI查询时出错: {str(e)}"
-        logger.exception(error_msg)
-        return jsonify({
-            "error": error_msg,
-            "result": {
-                "question": prompt if 'prompt' in locals() else "",
-                "answer": f"抱歉，处理您的问题时出现了错误: {str(e)}",
-                "error": str(e)
-            }
-        }), 500
+        return jsonify(result=run_ai_query(prompt))
+    except AIUnavailable as error:
+        return jsonify(error=str(error)), 503
+    except InvalidQuery as error:
+        return jsonify(error=str(error)), 422
+    except SQLAlchemyError:
+        logger.exception("AI data query failed")
+        return jsonify(error="当前问题无法转换为有效的数据查询，请调整问题"), 422

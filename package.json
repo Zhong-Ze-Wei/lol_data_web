@@ -1,0 +1,15 @@
+{
+  "name": "lol-data",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Unified League of Legends match data pipeline and analytics workspace",
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "test": "node scripts/run-tests.mjs",
+    "dev": "npm --prefix frontend run dev",
+    "start": "node scripts/run-python.mjs run.py",
+    "sync": "node scripts/run-python.mjs -m scripts.pipeline daily",
+    "import:legacy": "node scripts/run-python.mjs -m scripts.pipeline import-legacy --data-dir data/raw"
+  },
+  "engines": { "node": ">=22.12.0" }
+}

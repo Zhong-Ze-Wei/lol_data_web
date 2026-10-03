@@ -1,3 +1,5 @@
-# 当一个目录下有 __init__.py 文件时
-# Python 会把这个目录当成一个“包”来看待
-# 可以通过 import 来导入这个目录下的模块。
+from .match import Match
+from .player import Player
+from .team import Team
+
+__all__ = ['Match', 'Player', 'Team']
