@@ -15,13 +15,20 @@ sync_bp = Blueprint("sync", __name__, url_prefix="/api/sync")
 
 @sync_bp.get("/history")
 def history_status():
-    last_run = db.session.query(SyncRun).filter_by(command="history").order_by(SyncRun.started_at.desc()).first()
-    data_dir = Path(current_app.config["DATA_DIR"])
-    state_file, schedule_file = data_dir / "history-worker.json", data_dir / "history-schedule.json"
-    state = worker_status(state_file)
-    schedule = json.loads(schedule_file.read_text(encoding="utf-8-sig")) if schedule_file.is_file() else {"enabled": False}
-    return jsonify(**coverage_report(), last_run=last_run.to_dict() if last_run else None,
-                   worker=state, schedule=schedule)
+    with db.session.no_autoflush:
+        if db.engine.dialect.name == "sqlite":
+            connection = db.session.connection()
+            # SQLite 的 SELECT 不一定开启驱动事务；整个响应沿用同一读取快照。
+            # 已有事务保留，正常请求的事务由 Flask 应用上下文清理。
+            if not connection.connection.driver_connection.in_transaction:
+                connection.exec_driver_sql("BEGIN")
+        last_run = db.session.query(SyncRun).filter_by(command="history").order_by(SyncRun.started_at.desc()).first()
+        data_dir = Path(current_app.config["DATA_DIR"])
+        state_file, schedule_file = data_dir / "history-worker.json", data_dir / "history-schedule.json"
+        state = worker_status(state_file)
+        schedule = json.loads(schedule_file.read_text(encoding="utf-8-sig")) if schedule_file.is_file() else {"enabled": False}
+        return jsonify(**coverage_report(), last_run=last_run.to_dict() if last_run else None,
+                       worker=state, schedule=schedule)
 
 
 @sync_bp.get("/status")
