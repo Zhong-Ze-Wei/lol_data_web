@@ -136,6 +136,7 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False):
     }
     teams = []
     players = []
+    invalid_percentages = []
     team_stats = {
         'kill': 'kill', 'death': 'die', 'assist': 'asses', 'attack': 'attack', 'money': 'money',
         'tower': 'tower', 'small_dargon': 'small_dargon', 'big_dargon': 'big_dargon',
@@ -178,11 +179,20 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False):
             }
             for target, source in player_stats.items():
                 key = prefix + source
-                player[target] = numeric(
-                    info.get(key), key, integer=target in player_ints,
-                    required=target in ('kills', 'deaths', 'assists') and not allow_incomplete,
-                    percentage=target in ('part', 'atk_p', 'def_p'),
-                )
+                is_percentage = target in ('part', 'atk_p', 'def_p')
+                try:
+                    player[target] = numeric(
+                        info.get(key), key, integer=target in player_ints,
+                        required=target in ('kills', 'deaths', 'assists') and not allow_incomplete,
+                        percentage=is_percentage,
+                    )
+                except InvalidResult as exc:
+                    if not allow_incomplete or not is_percentage:
+                        raise
+                    player[target] = None
+                    missing.append(str(exc))
+                    invalid_percentages.append({'team_name': names[side], 'position': pos, 'field': target,
+                                                'source_field': key, 'source_value': info.get(key), 'reason': str(exc)})
                 if target in ('kills', 'deaths', 'assists') and player[target] is None:
                     missing.append(key)
             players.append(player)
@@ -190,6 +200,8 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False):
     normalized = {'matches': [match], 'teams': teams, 'players': players}
     if missing:
         normalized['source_incomplete'] = missing
+    if invalid_percentages:
+        normalized['invalid_percentages'] = invalid_percentages
     return normalized
 
 
@@ -308,6 +320,11 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
         bulk_upsert(Match, data['matches'], ['match_id'], preserve_nulls=preserve_nulls)
         bulk_upsert(Team, data['teams'], ['match_id', 'team_name'], preserve_nulls=preserve_nulls)
         bulk_upsert(Player, data['players'], ['match_id', 'team_name', 'position'], preserve_nulls=preserve_nulls)
+        # 明确无效的来源百分比必须留空；已核验旧值的 COALESCE 保护不适用于这些字段。
+        for invalid in data.get('invalid_percentages', []):
+            db.session.query(Player).filter_by(match_id=result_id, team_name=invalid['team_name'],
+                                              position=invalid['position']).update(
+                {invalid['field']: None}, synchronize_session=False)
         # 线上完整结果替换历史残缺/冲突多出来的自然键，现有正确记录仍原位更新。
         team_names = [team['team_name'] for team in data['teams']]
         db.session.query(Player).filter(Player.match_id == result_id, or_(

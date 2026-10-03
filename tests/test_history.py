@@ -550,6 +550,82 @@ def test_catalog_daily_refresh_requeues_only_changed_existing_entry(db, result, 
     assert archived.status == 'discovered' and archived.last_seen_at == checked_at
 
 
+@pytest.mark.parametrize('source_field,target,value', [
+    ('blue_star_a_part', 'part', '125'),
+    ('red_star_c_part', 'part', '146.15'),
+    ('red_star_d_part', 'part', '108.33'),
+    ('red_star_a_atk_p', 'atk_p', '-1'),
+    ('red_star_a_def_p', 'def_p', 'broken'),
+])
+def test_historical_invalid_optional_percentage_is_null_with_original_reason(db, result, tmp_path,
+                                                                           source_field, target, value):
+    result['data']['result_list'][source_field] = value
+    report, code = run(HistoricalSource(result), tmp_path)
+    assert code == 0
+    side, _, position, *_ = source_field.split('_')
+    team_name = result['data']['result_list'][side + '_name']
+    player = db.session.query(Player).filter_by(team_name=team_name, position=position).one()
+    assert getattr(player, target) is None
+    assert db.session.query(Player).count() == 10 and db.session.query(Team).count() == 2
+    task = db.session.query(SyncTask).one()
+    assert task.status == 'source_incomplete' and task.failure_count == 0 and task.next_retry_at is None
+    assert source_field in task.last_error and value in task.last_error
+    assert report['details']['coverage']['counts']['results'].get('complete', 0) == 0
+    assert json.loads((tmp_path / 'raw' / 'scoregg' / '66845.json').read_text(encoding='utf-8'))['data']['result_list'][source_field] == value
+    repeat = HistoricalSource(result)
+    assert run(repeat, tmp_path)[1] == 0 and repeat.calls == []
+
+
+def test_historical_invalid_percentage_overrides_verified_old_value_only(db, result, tmp_path):
+    assert ingest_result(result, 66845).status == 'imported'
+    player = db.session.query(Player).filter_by(team_name='LGD', position='a').one()
+    player.part = 150
+    valid_photo = player.pic
+    valid_attack = player.atk
+    db.session.commit()
+    info = result['data']['result_list']
+    info['red_star_a_part'] = '125'
+    info.pop('red_star_a_pic')
+    info.pop('red_star_a_atk_o')
+    outcome = ingest_result(result, 66845, allow_incomplete=True)
+    assert outcome.status == 'source_incomplete'
+    player = db.session.query(Player).filter_by(team_name='LGD', position='a').one()
+    assert player.part is None and player.pic == valid_photo and player.atk == valid_attack
+    assert 'red_star_a_part' in outcome.error and '125' in outcome.error
+
+
+def test_strict_daily_still_rejects_invalid_percentage_and_historical_structure_remains_strict(db, result, tmp_path):
+    result['data']['result_list']['red_star_a_part'] = '125'
+    assert ingest_result(result, 66845).status == 'failed'
+    assert db.session.query(Match).count() == 0
+    result['data']['result_list'].pop('blue_star_e_name')
+    assert ingest_result(result, 66845, allow_incomplete=True).status == 'source_incomplete'
+    assert db.session.query(Match).count() == 0 and db.session.query(Player).count() == 0
+    result['data']['result_list']['blue_star_e_name'] = 'restored'
+    result['data']['result_list']['red_star_a_kills'] = '-1'
+    assert ingest_result(result, 66845, allow_incomplete=True).status == 'failed'
+    assert db.session.query(Match).count() == 0
+
+
+def test_failed_historical_percentage_recovery_reuses_raw_without_network_or_retries(db, result, tmp_path):
+    run(HistoricalSource(result), tmp_path)
+    info = result['data']['result_list']
+    info['blue_star_a_part'] = '125'
+    raw = tmp_path / 'raw' / 'scoregg' / '66845.json'
+    raw.write_text(json.dumps(result), encoding='utf-8')
+    task = db.session.query(SyncTask).one()
+    task.status, task.failure_count, task.next_retry_at = 'failed', 2, utc_now() - timedelta(seconds=1)
+    db.session.commit()
+    source = HistoricalSource(result)
+    report, code = run(source, tmp_path)
+    assert code == 0 and source.calls == []
+    assert report['details']['outcomes'][0]['reused_raw'] is True
+    assert task.status == 'source_incomplete' and task.failure_count == 0 and task.next_retry_at is None
+    assert db.session.query(Player).filter_by(team_name='EDG', position='a').one().part is None
+    again = HistoricalSource(result)
+    assert run(again, tmp_path)[1] == 0 and again.calls == []
+
+
 def test_explicit_catalog_refresh_still_requeues_all_discovered_children(db, result, tmp_path, monkeypatch):
     checked_at = datetime(2026, 10, 3, 9)
     monkeypatch.setattr(history, 'utc_now', lambda: checked_at)
