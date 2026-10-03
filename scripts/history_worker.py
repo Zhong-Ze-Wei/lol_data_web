@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from scripts.pipeline import AlreadyRunning, PipelineLock, atomic_json
+from app.services.history_runtime import WorkerRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
 HK = timezone(timedelta(hours=8))
@@ -47,57 +48,70 @@ def wait_until(instant):
 
 def run_worker(max_requests, max_seconds, max_batches=None):
     state_file = ROOT / "data" / "history-worker.json"
+    with WorkerRuntime(state_file, atomic_json) as runtime:
+        return _run_batches(runtime, max_requests, max_seconds, max_batches)
+
+
+def _run_batches(runtime, max_requests, max_seconds, max_batches):
     batches = 0
-    while max_batches is None or batches < max_batches:
+    attempts = 0
+    while max_batches is None or attempts < max_batches:
         pause = daily_pause_seconds(datetime.now(timezone.utc))
         if pause:
             logging.info("每日采集优先，历史补采暂让出 %.0f 秒", pause)
-            wait_until(datetime.now(timezone.utc) + timedelta(seconds=pause))
+            resume = datetime.now(timezone.utc) + timedelta(seconds=pause)
+            runtime.update(status="daily_pause", current_batch=None, resume_at=resume.isoformat())
+            wait_until(resume)
         command = [sys.executable, "-X", "utf8", "-m", "scripts.pipeline", "history",
                    "--phase", "all", "--max-requests", str(max_requests),
                    "--max-seconds", str(max_seconds), "--min-interval", "1"]
+        runtime.update(status="running", current_batch=batches + 1, resume_at=None)
         try:
             result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
                                     encoding="utf-8", timeout=max_seconds + 180)
         except subprocess.TimeoutExpired:
             logging.error("历史采集批次超过执行期限；子进程已结束，持久任务可恢复。")
-            atomic_json(state_file, {"status": "failed", "reason": "batch_timeout",
-                                     "updated_at": datetime.now(timezone.utc).isoformat()})
+            runtime.update(status="failed", reason="batch_timeout")
             return 2
-        batches += 1
+        attempts += 1
         if result.returncode not in (0, 2, 3, 4):
             logging.error("历史采集进程退出 %s：%s", result.returncode, result.stderr[-3000:])
-            atomic_json(state_file, {"status": "failed", "exit_code": result.returncode,
-                                     "updated_at": datetime.now(timezone.utc).isoformat()})
+            runtime.update(status="failed", reason="batch_exit", exit_code=result.returncode)
             return 2
         try:
             report = json.loads(result.stdout)
         except json.JSONDecodeError:
             logging.error("历史采集未返回有效报告：%s", result.stderr[-3000:])
-            atomic_json(state_file, {"status": "failed", "reason": "invalid_report",
-                                     "updated_at": datetime.now(timezone.utc).isoformat()})
+            runtime.update(status="failed", reason="invalid_report")
             return 2
         coverage = report.get("details", {}).get("coverage", {})
         action = next_action(result.returncode, coverage)
-        atomic_json(state_file, {"status": action, "batch": batches,
-                                 "last_run_id": report.get("run_id"),
-                                 "request_count": report.get("request_count", 0),
-                                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                                 "next_retry_at": coverage.get("next_retry_at")})
-        logging.info("历史批次 %s，动作 %s，请求 %s，导入 %s，失败 %s", batches, action,
-                     report.get("request_count", 0), report.get("imported", 0), report.get("failed", 0))
+        if result.returncode == 3:
+            runtime.update(status=action, current_batch=None)
+        else:
+            batches += 1
+            runtime.update(status=action, batch=batches, current_batch=None, last_completed_batch=batches,
+                           last_run_id=report.get("run_id"), request_count=report.get("request_count", 0),
+                           next_retry_at=coverage.get("next_retry_at"))
+        logging.info("历史尝试 %s，动作 %s，已执行批次 %s，请求 %s，导入 %s，失败 %s", attempts, action, batches,
+                      report.get("request_count", 0), report.get("imported", 0), report.get("failed", 0))
         if action == "completed":
             return 0
         if action == "failed":
             logging.error("历史补采仍有无法自动处理的缺口；请查看最后一批报告。")
             return 2
         if action == "locked":
+            runtime.update(resume_at=(datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat())
             time.sleep(60)
         elif action == "retry_later":
             instant = datetime.fromisoformat(coverage["next_retry_at"].replace("Z", "+00:00"))
-            wait_until(max(instant, datetime.now(timezone.utc) + timedelta(seconds=60)))
+            resume = max(instant, datetime.now(timezone.utc) + timedelta(seconds=60))
+            runtime.update(resume_at=resume.isoformat())
+            wait_until(resume)
         elif result.returncode == 2:
+            runtime.update(status="retry_wait", resume_at=(datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat())
             time.sleep(60)
+    runtime.update(status="stopped", reason="batch_limit")
     return 0
 
 
