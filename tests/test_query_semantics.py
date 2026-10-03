@@ -109,6 +109,42 @@ def test_win_rate_sample_column_exposes_the_actual_denominator_to_the_ui(client,
     assert result["data"][0]["sample_size"] == 4
 
 
+def test_count_sum_and_max_sample_columns_distinguish_missing_records_from_recorded_zero(client, ai, db):
+    match_id = 3600
+    for name, known, kills, mvp in [("Missing", 0, None, None), ("SparseZero", 1, 0, 0),
+                                   ("KnownZero", 10, 0, 0), ("KnownPositive", 10, 3, 1)]:
+        for index in range(10):
+            match_id += 1
+            db.session.add(Match(match_id=match_id))
+            db.session.add(Player(match_id=match_id, name=name, team_name="A", position="c",
+                                  kills=kills if index < known else None, mvp=mvp if index < known else None))
+    db.session.commit()
+    metrics = ["total_kills", "max_kills", "mvp_count"]
+    ai.side_effect = [json.dumps(plan(dimensions=["player", "team"], metrics=metrics,
+                                     order_by="player", direction="asc")), "请同时查看各项有效样本。"]
+    response = client.post("/api/ai/query", json={"prompt": "按选手和当局战队查看总击杀、最高击杀及MVP次数"})
+    assert response.status_code == 200 and ai.call_count == 2
+    result = response.json["result"]
+    by_name = {row["player"]: row for row in result["data"]}
+    columns = {column["key"]: column for column in result["columns"]}
+    assert result["chart"]["type"] == "table"  # 无图时也能直接读到逐项有效样本。
+    for metric in metrics:
+        column = columns[f"{metric}_samples"]
+        assert column["unit"] == "次" and "有效样本" in column["label"]
+        assert by_name["Missing"][f"{metric}_samples"] == 0
+        assert by_name["SparseZero"][f"{metric}_samples"] == 1
+        assert by_name["KnownZero"][f"{metric}_samples"] == 10
+        assert by_name["KnownPositive"][f"{metric}_samples"] == 10
+        assert by_name["SparseZero"][metric] == by_name["KnownZero"][metric] == 0
+    assert by_name["Missing"]["total_kills"] is None and by_name["Missing"]["max_kills"] is None
+    assert by_name["Missing"]["mvp_count"] == 0  # 保留已记录次数的原计数口径，样本0说明来源缺项。
+    assert by_name["KnownPositive"]["total_kills"] == 30
+    assert by_name["KnownPositive"]["max_kills"] == 3
+    assert by_name["KnownPositive"]["mvp_count"] == 10
+    assert "非空MVP标志" in columns["mvp_count_samples"]["definition"]
+    assert "0不能" in columns["mvp_count_samples"]["definition"]
+
+
 def test_zero_deaths_and_missing_metrics_remain_unknown(db, sample_data):
     db.session.execute(text("UPDATE players SET deaths=0, kills=2, assists=3 WHERE name='Faker'"))
     db.session.commit()

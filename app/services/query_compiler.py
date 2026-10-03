@@ -194,13 +194,15 @@ def result_columns(plan):
         columns.append({"key": key, "label": definition["label"], "type": "number", "unit": definition["unit"], "definition": definition["definition"] or "仅对已知值计算，缺失值不算零。"})
     columns.append({"key": "sample_size", "label": "样本出场数" if plan["subject"] != "match" else "样本局数", "type": "number", "unit": "次" if plan["subject"] != "match" else "局", "definition": GRAINS[plan["subject"]]})
     for key in plan["metrics"]:
-        if METRICS[plan["subject"]][key]["operation"] in {"avg", "aggregate_kda", "binary_rate", "rate_per_min", "win_rate"}:
+        if METRICS[plan["subject"]][key]["operation"] in {"avg", "sum", "max", "mvp_count", "aggregate_kda", "binary_rate", "rate_per_min", "win_rate"}:
             if key == "win_rate":
                 definition = "胜负已知出场数，胜率分母；未知胜负不计入。"
             elif METRICS[plan["subject"]][key]["operation"] == "rate_per_min":
                 definition = "总量已知且非负、比赛时长大于1秒的出场数；每项指标独立计数。"
             elif key == "avg_duration":
                 definition = "比赛记录时长大于1秒的出场数；缺失和1秒占位不计入。"
+            elif key == "mvp_count":
+                definition = "来源已记录的非空MVP标志数；已记录未获MVP的0计入，NULL不计入。有效样本为0不能据此认定实际没有MVP。"
             else:
                 definition = "实际参与该指标计算的非空样本数。"
             columns.append({"key": f"{key}_samples", "label": f"{METRICS[plan['subject']][key]['label']}有效样本", "type": "number", "unit": "次", "definition": definition})
