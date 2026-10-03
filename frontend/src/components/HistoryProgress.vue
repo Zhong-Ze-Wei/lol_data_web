@@ -10,6 +10,7 @@ import {
 } from "../utils/history.js";
 import Icon from "./Icon.vue";
 
+const emit = defineEmits(["updated"]);
 const { data, loading, error, reload } = useResource(async (signal) => {
   const requestedAt = performance.now();
   const result = await request("/api/sync/history", { signal });
@@ -29,6 +30,7 @@ watch(data, (value) => {
     stateRequestedAt.value = value.requestedAt;
     clock.value = value.receivedAt;
     statusUnavailable.value = false;
+    emit("updated", value.result);
   }
 });
 const progress = computed(() => {

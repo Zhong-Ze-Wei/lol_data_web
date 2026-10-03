@@ -1,5 +1,12 @@
 <script setup>
-import { computed, nextTick, onScopeDispose, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onScopeDispose,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import { request, streamAIQuery } from "../services/api.js";
 import { useResource } from "../composables/useResource.js";
 import {
@@ -8,6 +15,7 @@ import {
   duration,
   date,
   detailLink,
+  timestamp,
 } from "../utils/format.js";
 import { queryBody } from "../utils/ai.js";
 import ResourceState from "../components/ResourceState.vue";
@@ -17,6 +25,26 @@ import MatchStatus from "../components/MatchStatus.vue";
 import HistoryProgress from "../components/HistoryProgress.vue";
 
 const stats = useResource((signal) => request("/api/stats", { signal }));
+const latestStats = shallowRef(null);
+const historyOverview = shallowRef(null);
+watch(stats.data, (value) => {
+  if (value) {
+    latestStats.value = {
+      stats: value.stats,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+});
+function updateOverview(progress) {
+  if (progress.overview_stats) {
+    historyOverview.value = {
+      stats: progress.overview_stats,
+      updatedAt: progress.updated_at,
+    };
+  }
+}
+// 总览和目录覆盖以同一 history 响应为准，迟来的初始 stats 只作备用。
+const overview = computed(() => historyOverview.value || latestStats.value);
 const recent = useResource((signal) =>
   request("/api/recent-matches", { signal }),
 );
@@ -142,8 +170,8 @@ function rowLink(row) {
     >
   </header>
   <ResourceState
-    :loading="stats.loading.value"
-    :error="stats.error.value"
+    :loading="!overview && stats.loading.value"
+    :error="overview ? '' : stats.error.value"
     @retry="stats.reload"
     ><section class="overview-stats" aria-label="数据收录概况">
       <RouterLink
@@ -154,7 +182,7 @@ function rowLink(row) {
         ><span class="stat-icon"><Icon :name="icon" /></span>
         <div>
           <span>{{ label }}</span
-          ><strong>{{ number(stats.data.value?.stats?.[key]) }}</strong>
+          ><strong>{{ number(overview?.stats?.[key]) }}</strong>
         </div>
         <span class="stat-unit">{{
           key === "players" ? "位" : key === "teams" ? "支" : "场"
@@ -162,7 +190,10 @@ function rowLink(row) {
       >
     </section></ResourceState
   >
-  <HistoryProgress />
+  <p v-if="overview?.updatedAt" class="muted small-text">
+    总览统计更新 {{ timestamp(overview.updatedAt) }}（香港时间）
+  </p>
+  <HistoryProgress @updated="updateOverview" />
   <div class="portal-grid">
     <section class="panel recent-panel">
       <header class="panel-header">

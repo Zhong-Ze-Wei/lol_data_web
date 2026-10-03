@@ -9,6 +9,7 @@ from app.models.match import Match
 from app.models.sync import SyncRun, SyncTask
 from app.services.history import coverage_report
 from app.services.history_runtime import worker_status
+from app.services.overview import overview_stats
 
 sync_bp = Blueprint("sync", __name__, url_prefix="/api/sync")
 
@@ -28,7 +29,7 @@ def history_status():
         state = worker_status(state_file)
         schedule = json.loads(schedule_file.read_text(encoding="utf-8-sig")) if schedule_file.is_file() else {"enabled": False}
         return jsonify(**coverage_report(), last_run=last_run.to_dict() if last_run else None,
-                       worker=state, schedule=schedule)
+                       worker=state, schedule=schedule, overview_stats=overview_stats())
 
 
 @sync_bp.get("/status")
