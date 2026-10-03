@@ -23,13 +23,13 @@ const nav = [
   ["/analytics", "数据分析"],
 ];
 const labels = {
-  success: "采集完成",
-  completed: "采集完成",
-  running: "正在采集",
+  success: "最近采集已完成",
+  completed: "最近采集已完成",
+  running: "最近采集未完成",
   partial: "部分完成",
   failed: "采集失败",
   cancelled: "已停止",
-  budget_exhausted: "正在分批补采",
+  budget_exhausted: "最近批次待续采",
   interrupted: "采集已中断，等待恢复",
   waiting_retry: "等待重试",
   stale: "源站暂无近期赛程",

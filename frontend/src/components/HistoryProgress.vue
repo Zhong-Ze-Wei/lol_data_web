@@ -1,17 +1,58 @@
 <script setup>
-import { computed } from "vue";
+import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { request } from "../services/api.js";
 import { useResource } from "../composables/useResource.js";
 import { number, timestamp } from "../utils/format.js";
 import { historyLabel, stateCount } from "../utils/history.js";
 import Icon from "./Icon.vue";
 
-const {
-  data: progress,
-  loading,
-  error,
-  reload,
-} = useResource((signal) => request("/api/sync/history", { signal }));
+const { data, loading, error, reload } = useResource((signal) =>
+  request("/api/sync/history", { signal }),
+);
+const latest = shallowRef(null);
+const receivedAt = ref(performance.now());
+const clock = ref(receivedAt.value);
+watch(data, (value) => {
+  if (value) {
+    latest.value = value;
+    receivedAt.value = performance.now();
+    clock.value = receivedAt.value;
+  }
+});
+const progress = computed(() => {
+  const value = data.value || latest.value;
+  if (!value?.worker) return value;
+  const worker = value.worker;
+  const age =
+    worker.heartbeat_age_seconds + (clock.value - receivedAt.value) / 1000;
+  return {
+    ...value,
+    worker: {
+      ...worker,
+      alive:
+        worker.alive === true &&
+        age >= 0 &&
+        age <= worker.heartbeat_timeout_seconds,
+    },
+  };
+});
+const clockTimer = setInterval(() => {
+  clock.value = performance.now();
+}, 15000);
+const refreshTimer = setInterval(reload, 30000);
+onScopeDispose(() => {
+  clearInterval(clockTimer);
+  clearInterval(refreshTimer);
+});
+const runtimeLabel = computed(() => {
+  const worker = progress.value?.worker;
+  if (!worker) return "后台尚未报告运行状态";
+  if (worker.alive) return "后台最近心跳正常";
+  if (worker.status === "completed") return "本轮后台执行已结束";
+  if (worker.status === "failed") return "后台执行遇到错误";
+  if (worker.status === "stopped") return "后台执行已停止";
+  return "未收到近期后台心跳，运行状态待确认";
+});
 const status = computed(() =>
   progress.value ? historyLabel(progress.value) : "读取历史补采进度…",
 );
@@ -74,9 +115,7 @@ const fields = [
       <span
         class="history-state"
         :class="{
-          active:
-            progress?.last_run?.status === 'running' ||
-            progress?.worker?.status === 'continue',
+          active: !error && progress?.worker?.alive === true,
         }"
         >{{ error ? "历史补采进度暂不可用" : status }}</span
       >
@@ -124,9 +163,24 @@ const fields = [
           >重试已耗尽
           {{ number(progress.exhausted_tasks) }} 项，需核查来源</span
         >
-        <span v-if="progress.worker?.batch != null"
-          >当前第 {{ number(progress.worker.batch) }} 批</span
+        <span
+          v-if="progress.worker?.alive && progress.worker.current_batch != null"
+          >当前第 {{ number(progress.worker.current_batch) }} 批</span
         >
+        <span
+          v-else-if="
+            (progress.worker?.last_completed_batch ?? progress.worker?.batch) >
+            0
+          "
+          >上次完成第
+          {{
+            number(
+              progress.worker.last_completed_batch ?? progress.worker.batch,
+            )
+          }}
+          批</span
+        >
+        <span>{{ runtimeLabel }}</span>
       </div>
       <details class="history-details">
         <summary>查看逐年进度与旧记录缺口</summary>
