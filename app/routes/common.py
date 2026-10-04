@@ -125,7 +125,7 @@ def match_data(match):
         'id': match.id, 'match_id': match.match_id,
         'series_id': match.series_id, 'tournament_id': match.tournament_id,
         'tournament_name': match.tournament_name,
-        'date': match.date.strftime('%Y-%m-%d') if match.date else None,
+        'date': match.date.strftime('%Y-%m-%d') if match.date and match.date_source == 'schedule' else None,
         'date_source': match.date_source, 'source': match.source, 'verified': match.verified,
         'game_time': match.game_time if match.game_time is not None and match.game_time > 1 else None,
         'red_team_name': match.red_team_name,

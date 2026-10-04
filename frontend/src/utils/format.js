@@ -34,7 +34,7 @@ export function duration(value) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 export const date = (value) =>
-  value ? String(value).slice(0, 10) : "日期未记录";
+  value ? String(value).slice(0, 10) : "日期待确认";
 export const timestamp = (value) =>
   new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Hong_Kong",
