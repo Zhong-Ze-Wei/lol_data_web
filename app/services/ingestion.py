@@ -244,13 +244,16 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
     data = payload.get('data')
     if not isinstance(data, dict) or not data:
         raise PendingResult('上游尚无单局详情')
-    if 'gameID' not in data:
-        raise InvalidResult('上游缺少 gameID，无法确认 LOL')
-    if str(data['gameID']) != '1':
+    result_id = _known_identity_id(result_id)
+    if result_id is None:
+        raise InvalidResult('请求的 result_id 必须是明确的正整数')
+    if 'resultID' in data and _known_identity_id(data['resultID']) != result_id:
+        raise InvalidResult('返回的 resultID 无效或与请求的单局 ID 不一致')
+    game_id = _known_identity_id(data.get('gameID'))
+    if game_id is None:
+        raise InvalidResult('上游 gameID 缺失或不是明确的正整数，无法确认游戏')
+    if game_id != 1:
         raise NonLOLResult(f"gameID={data['gameID']}，不是 LOL")
-    result_id = int(result_id)
-    if data.get('resultID') and int(data['resultID']) != result_id:
-        raise InvalidResult('返回的 resultID 与请求的单局 ID 不一致')
     info = data.get('result_list')
     if not isinstance(info, dict) or not info:
         raise PendingResult('result_list 尚未生成')
