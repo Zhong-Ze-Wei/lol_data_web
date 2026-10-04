@@ -25,6 +25,9 @@ const resource = useResource(
 );
 const match = computed(() => resource.data.value?.match);
 const players = computed(() => resource.data.value?.players || []);
+const neutralSides = computed(
+  () => match.value?.side_basis === "metadata_team_a_b",
+);
 const sideLabels = computed(() =>
   match.value?.side_basis === "metadata_team_a_b"
     ? { blue: "队伍 A", red: "队伍 B" }
@@ -150,7 +153,7 @@ const damage = computed(() => {
         {{ qualityNotice }}
       </p>
       <section class="match-scoreboard">
-        <div class="score-team blue">
+        <div class="score-team" :class="{ blue: !neutralSides }">
           <span class="eyebrow">{{ sideLabels.blue }}</span
           ><RouterLink :to="detailLink('team', match.blue_team_name)">{{
             match.blue_team_name
@@ -168,7 +171,7 @@ const damage = computed(() => {
           ><small v-if="!match.win_team_name">胜负待确认</small
           ><small v-if="match.mvp">MVP / {{ match.mvp }}</small>
         </div>
-        <div class="score-team red">
+        <div class="score-team" :class="{ red: !neutralSides }">
           <span class="eyebrow">{{ sideLabels.red }}</span
           ><RouterLink :to="detailLink('team', match.red_team_name)">{{
             match.red_team_name
@@ -183,7 +186,9 @@ const damage = computed(() => {
       <div class="analysis-grid">
         <section v-for="side in sides" :key="side.color" class="panel">
           <header class="panel-header">
-            <h2 :class="side.color">{{ side.teamName }}</h2>
+            <h2 :class="neutralSides ? null : side.color">
+              {{ side.teamName }}
+            </h2>
             <span class="tag">{{ side.name }}</span>
           </header>
           <div v-if="side.team" class="team-objectives">
@@ -211,7 +216,9 @@ const damage = computed(() => {
         class="panel section-space"
       >
         <header class="panel-header">
-          <h2 :class="side.color">{{ side.name }}选手数据</h2>
+          <h2 :class="neutralSides ? null : side.color">
+            {{ side.name }}选手数据
+          </h2>
           <span class="eyebrow">{{ side.teamName }}</span>
         </header>
         <div class="table-scroll">
