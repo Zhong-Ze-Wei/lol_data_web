@@ -1,5 +1,15 @@
 # LOL Data 整合与实测记录
 
+## 2026-10-04：争议胜负与官方清单补采
+
+两局旧IEM战报1262、1265的单局胜方ID不属于双方，且原胜负标记与完整BO587最终比分冲突。香港时间12:12:29完成有限修正，只将2条Match胜方、4条Team结果、20条Player结果置为NULL，不根据系列总比分猜单局赢家。八表559,667个既有主键、15,272,465个字段逐项核验，仅26条记录的26个胜负字段改变；日期、名称、指标、来源证据、verified、任务状态和6局正确对照全部保留。正式只读重跑noop，零改动，不开写连接、不创建备份或输出文件。证据见本机 `artifacts/two-winner-confidence-production-invocation-20261004.json`、`artifacts/two-winner-confidence-production-readonly-repeat-20261004.json`。
+
+正式网站1440px桌面1262、390px手机1265均显示“胜负待确认”，两队和十位选手保留；1258的IMT胜、1264的JT胜仍正确显示。四个实际页面均无文档横向溢出、NaN、浏览器错误或AI请求，未使用模拟API。独立人工合法Team、Player、Match查询计划实际执行30条编译SELECT、30条独立SQL及6条目标/对照SELECT，884个结果单元格一致；未知胜负不算败场，胜率仅使用已知结果。JT在BO587剩1局已知、2局未知，已知样本胜率100%不能解读为该系列全胜。此验收未调用真实模型，也不代表历史赛事已补齐；报告见本机 `artifacts/two-winner-production-textsql-independent-proof-20261004.json`。
+
+官网公开页面声明的匿名元数据POST可以补充CDN清单404缺失的真实单局编号。补采版本 `36a2389` 已同步GitHub，历史采集和日更共用原请求/时间/退避预算；验证BO、赛事、双方来源ID、日期、最终比分、唯一单局ID及不可覆盖原件。BO5打成3:0只需三局，不补造剩余局数；来源计数或赛程冲突仍保留真实失败。1032项完整回归通过（Python929、前端103），构建、Ruff、Prettier、diffcheck及独立审查通过。Windows新检出的投影测试原件随 `0c83deb` 固定为LF，保留严格物理字节SHA校验，未修改来源原件。详见 `RESULTLIST-FALLBACK.md`。
+
+实际匿名来源验证中，BO20839给出唯一单局35121，但其默认详情仍HTTP404，尚未导入；BO27625声明两局却返回空清单，仍是来源矛盾。当前版本只补清单，未把官网基础统计当作完整详情。香港时间12:25:23读取快照：目录298/388，89项排队、1项运行；目录内核验34,762局，1,711局仍有来源缺项，33项失败、28项耗尽原预算。三项完成标记均false，后台继续运行；这与历史未核验的6,104局为不同范围。快照见本机 `artifacts/history-observation-20261004-1228.json`。
+
 ## 2026-10-04：公共日期确认与旧阶段来源缺口
 
 公共比赛日期仅展示 `date_source=schedule` 的值，其余显示“日期待确认”，不把更新时间当作赛程。12局虽有同号BO，双方来源ID却与原赛程冲突；香港时间11:09完成撤销日期确认，只将12条Match的 `date_source` 从 `schedule` 改为 `unknown`，不猜正确日期。八表525,764个既有主键、14,349,188个字段核对，仅12处变化；日期原值、名称、指标、来源证据、采集任务和历史状态均保留，零HTTP、AI及原件写入。随后真实只读重跑为noop，零改动，不开写连接、不创建新备份或输出文件。生产报告与重跑记录见本机 `artifacts/twelve-date-confidence-production-invocation-20261004.json`、`artifacts/twelve-date-confidence-production-readonly-repeat-20261004.json`。
