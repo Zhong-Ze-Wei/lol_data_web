@@ -32,11 +32,17 @@ def query_scope(plan, apply_time=True, apply_dimension_presence=True):
     filters, conditions = plan["filters"], []
     fields = {"player": fact.c.name if plan["subject"] == "player" else None,
               "hero": fact.c.hero if plan["subject"] == "player" else None,
-              "position": fact.c.position if plan["subject"] == "player" else None,
-              "tournament": matches.c.tournament_name, "opponent": opponent}
+              "tournament": matches.c.tournament_name, "opponent": opponent, "source": matches.c.source}
     for key, column in fields.items():
         if filters.get(key):
             conditions.append(column.in_(filters[key]))
+    if filters.get("position"):
+        position = fact.c.position
+        selected = [code for code in filters["position"] if code != "unknown"]
+        predicates = [position.in_(selected)] if selected else []
+        if "unknown" in filters["position"]:
+            predicates.append(or_(position.is_(None), position.not_in(POSITIONS)))
+        conditions.append(or_(*predicates))
     if filters.get("tournament_contains"):
         conditions.append(or_(*[func.lower(matches.c.tournament_name).contains(term.casefold(), autoescape=True) for term in filters["tournament_contains"]]))
     if filters.get("team"):

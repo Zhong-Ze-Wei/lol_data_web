@@ -17,7 +17,14 @@ POSITIONS = {"a": "上单", "b": "打野", "c": "中单", "d": "下路/ADC", "e"
 POSITION_ALIASES = {
     **{code: code for code in POSITIONS}, "上单": "a", "top": "a", "打野": "b", "jungle": "b",
     "中单": "c", "mid": "c", "下路": "d", "adc": "d", "辅助": "e", "support": "e",
+    "unknown": "unknown", "未知位置": "unknown",
 }
+UNKNOWN_POSITION_DEFINITION = "未知位置指来源位置为NULL或不属于a–e的出场；不按姓名或其他比赛推断角色。"
+SOURCES = {"legacy": "旧CSV导入", "scoregg": "官网详情战报", "scoregg_metadata": "官网基础元数据"}
+SOURCE_DEFINITION = (
+    "来源类型与来源核验均不保证阵容、位置、时长和全部指标齐全；"
+    "scoregg详情战报也可能缺项，不能把该来源等同于完整战报；每项指标的有效样本数另行列出。"
+)
 GRAINS = {"player": "选手单局出场", "team": "战队单局出场", "match": "一局比赛（非 BO 系列）"}
 TEAM_NAME_DEFINITION = (
     "每条出场或比赛记录保存的来源队伍标签，包含未核验的历史导入标签；"
@@ -100,7 +107,7 @@ METRICS = {
         "games": metric("比赛单局数", "count", unit="局", definition="一行一局，matches.match_id 为单局 resultID，不是 BO matchID。"),
     },
 }
-FILTER_KEYS = {"player", "team", "hero", "position", "opponent", "tournament", "tournament_contains", "date_start", "date_end", "verified_only"}
+FILTER_KEYS = {"player", "team", "hero", "position", "opponent", "tournament", "tournament_contains", "source", "date_start", "date_end", "verified_only"}
 PLAN_KEYS = {"type", "subject", "dimensions", "metrics", "filters", "min_games", "order_by", "direction", "limit", "per_group_top_n"}
 # 别名只落到当前数据库实际存在的名称；不把 SKT/T1 等历史战队名默默合并。
 ENTITY_ALIASES = {"player": {"飞科": ["Faker"], "李相赫": ["Faker"]},
@@ -183,6 +190,8 @@ def validate_plan(value):
     for key in FILTER_KEYS - {"date_start", "date_end", "verified_only"}:
         if key in filters:
             filters[key] = bounded_strings(filters[key], f"{key}筛选")
+    if any(source not in SOURCES for source in filters.get("source", [])):
+        raise InvalidPlan("source只能为legacy/scoregg/scoregg_metadata")
     if subject != "player" and any(filters.get(key) for key in ("player", "hero", "position")):
         raise InvalidPlan("选手/英雄/位置筛选只用于选手出场分析，避免关联放大")
     if subject == "match" and filters.get("opponent"):
@@ -206,7 +215,7 @@ def validate_plan(value):
         try:
             filters["position"] = list(dict.fromkeys(POSITION_ALIASES[normalize_name(item)] for item in filters["position"]))
         except KeyError as error:
-            raise InvalidPlan("位置只能为上单/打野/中单/下路/辅助或a–e") from error
+            raise InvalidPlan("位置只能为上单/打野/中单/下路/辅助、a–e或unknown（未知位置）") from error
     focused = (subject == "player" and 1 <= len(filters.get("player", [])) <= 2) or (subject == "team" and 1 <= len(filters.get("team", [])) <= 2)
     temporal = bool(set(dimensions) & {"day", "month", "year"})
     default_min = 10 if dimensions and not focused and not temporal and any(METRICS[subject][item]["operation"] in {"avg", "win_rate", "aggregate_kda", "binary_rate", "rate_per_min"} for item in metrics) else 1
@@ -339,9 +348,13 @@ def semantic_catalog():
             "grain": GRAINS[subject], "dimensions": {key: DIMENSIONS[key] for key in sorted(SUBJECT_DIMENSIONS[subject])},
             "metrics": {key: {field: value for field, value in definition.items() if field in {"label", "unit", "definition"}} for key, definition in metrics.items()},
         } for subject, metrics in METRICS.items()},
-        "positions": POSITIONS,
+        "positions": {**POSITIONS, "unknown": "未知位置"},
+        "sources": SOURCES,
         "rules": [
             TEAM_NAME_DEFINITION,
+            UNKNOWN_POSITION_DEFINITION,
+            "filters.source使用来源类型字符串数组：legacy=旧CSV导入、scoregg=官网详情战报、scoregg_metadata=官网基础元数据；可并集筛选，独立于verified_only。",
+            SOURCE_DEFINITION,
             "时间筛选/趋势只用真实赛程日期date_source=schedule；updated_at不能作为比赛年份、赛季或补丁。",
             "赛事只能用实际tournament_name；缺失赛事归属不能据日期推断赛季/赛区。",
             "联赛/世界赛聚合用filters.tournament_contains文字片段数组，按真实赛事名文字匹配，不推断赛区；全球总决赛可用全球总决赛/世界总决赛/Worlds。",

@@ -74,6 +74,106 @@ def ai(app, monkeypatch):
 
 
 @pytest.fixture
+def source_position_data(db):
+    # 人工来源组合验证过滤独立性；metadata 保持真实的未知角色/时长/伤害缺项。
+    for offset, source in enumerate(("legacy", "scoregg", "scoregg_metadata")):
+        for verified in (False, True):
+            match_id = 100 + offset * 2 + int(verified)
+            db.session.add(Match(match_id=match_id, source=source, verified=verified,
+                                 red_team_name="T1", blue_team_name="GEN", win_team_name="T1",
+                                 date=datetime(2026, 1, 1), date_source="schedule",
+                                 game_time=None if source == "scoregg_metadata" else 1800))
+            for side, team_name in enumerate(("T1", "GEN")):
+                db.session.add(Team(match_id=match_id, team_name=team_name, result=1 - side))
+                positions = [None] * 5 if source == "scoregg_metadata" else list("abcde")
+                if source == "legacy":
+                    positions = [None, "MID" if not side else "" if not verified else "c ", "c", "a", "e"]
+                for slot, position in enumerate(positions):
+                    db.session.add(Player(
+                        match_id=match_id, team_name=team_name, position=position,
+                        source_player_id=str(match_id * 10 + side * 5 + slot),
+                        name="Faker" if not side and slot == 2 else f"{team_name}-{slot}",
+                        result=str(1 - side), kills=3,
+                    ))
+    db.session.commit()
+
+
+@pytest.mark.parametrize("position", ["unknown", "未知位置"])
+def test_unknown_position_filter_matches_the_existing_unknown_group(source_position_data, position):
+    grouped, _ = rows(plan(dimensions=["position"]))
+    unknown_count = next(row["games"] for row in grouped if row["position"] == "未知位置")
+    selected, evidence = rows(plan(dimensions=["position"], filters={"position": [position]}))
+    assert [(row["position"], row["games"]) for row in selected] == [("未知位置", 28)]
+    assert unknown_count == evidence[0]["sample_size"] == 28
+    assert plan(filters={"position": [position]})["filters"]["position"] == ["unknown"]
+
+
+def test_unknown_position_can_be_unioned_with_known_roles_without_inferring_faker_role(db, source_position_data):
+    known, _ = rows(plan(dimensions=["position"], filters={"position": ["中单"]}))
+    mixed, evidence = rows(plan(dimensions=["position"], filters={"position": ["中单", "unknown", "未知位置"]}))
+    assert [(row["position"], row["games"]) for row in known] == [("中单", 8)]
+    assert {row["position"]: row["games"] for row in mixed} == {"未知位置": 28, "中单": 8}
+    assert evidence[0]["sample_size"] == 36
+    faker, _ = rows(plan(filters={"player": ["Faker"], "position": ["unknown"]}))
+    assert faker[0]["games"] == 2
+    assert [row.position for row in Player.query.filter_by(name="Faker").order_by(Player.match_id)] == ["c", "c", "c", "c", None, None]
+
+
+@pytest.mark.parametrize("subject,per_match", [("player", 10), ("team", 2), ("match", 1)])
+def test_source_filter_respects_each_fact_grain_and_verified_independently(source_position_data, subject, per_match):
+    for source in ("legacy", "scoregg", "scoregg_metadata"):
+        for verified_only in (False, True):
+            expected_matches = 1 if verified_only else 2
+            value = plan(subject=subject, dimensions=[], metrics=["games", "matches"],
+                         filters={"source": [source], "verified_only": verified_only})
+            data, evidence = rows(value)
+            assert data[0]["games"] == evidence[0]["sample_size"] == expected_matches * per_match
+            assert data[0]["matches"] == evidence[0]["matches"] == expected_matches
+            assert evidence[0]["verified_matches"] == 1
+            assert evidence[0]["unverified_matches"] == int(not verified_only)
+
+
+@pytest.mark.parametrize("subject,per_match", [("player", 10), ("team", 2), ("match", 1)])
+def test_source_filter_union_is_preserved_in_date_coverage(source_position_data, subject, per_match):
+    value = plan(subject=subject, dimensions=[], metrics=["games", "matches"],
+                 filters={"source": ["scoregg", "scoregg_metadata"], "date_start": "2026-01-01"})
+    compiled = compile_plan(value)
+    data, evidence, coverage = execute_readonly_batch([compiled["statement"], compiled["evidence"], compiled["coverage"]])
+    assert data[0]["games"] == evidence[0]["sample_size"] == coverage[0]["sample_size"] == 4 * per_match
+    assert data[0]["matches"] == evidence[0]["matches"] == coverage[0]["matches"] == 4
+
+
+@pytest.mark.parametrize("source", [["complete"], ["ScoreGG"], ["旧CSV"], [None], "scoregg"])
+def test_source_filter_rejects_unknown_names_and_invalid_shapes(source):
+    with pytest.raises(InvalidPlan):
+        plan(filters={"source": source})
+
+
+def test_source_filter_and_unknown_position_are_exposed_to_planner_catalog_and_result(client, ai, source_position_data):
+    value = plan(dimensions=["player", "position"], metrics=["games", "avg_duration", "avg_damage"],
+                 filters={"player": ["Faker"], "position": ["未知位置"],
+                          "source": ["scoregg_metadata"], "verified_only": True})
+    ai.return_value = json.dumps(value)
+    response = client.post("/api/ai/query", json={"prompt": "只看官网基础元数据中已核验、未知位置的Faker出场和时长伤害", "explain": False})
+    assert response.status_code == 200 and ai.call_count == 1
+    result = response.json["result"]
+    assert result["context"]["plan"] == value and result["evidence"]["repaired"] is False
+    assert result["data"][0]["position"] == "未知位置" and result["data"][0]["games"] == 1
+    assert result["data"][0]["avg_duration"] is None and result["data"][0]["avg_duration_samples"] == 0
+    assert result["data"][0]["avg_damage"] is None and result["data"][0]["avg_damage_samples"] == 0
+    assert any("来源类型" in item and "不保证" in item and "scoregg" in item for item in result["assumptions"])
+    assert any("官网基础元数据" in item for item in result["assumptions"])
+    assert any("未知位置" in item and "不按姓名" in item for item in result["assumptions"])
+    catalog = client.get("/api/ai/catalog").json["result"]
+    assert catalog["positions"]["unknown"] == "未知位置"
+    assert set(catalog["sources"]) == {"legacy", "scoregg", "scoregg_metadata"}
+    planning_prompt = ai.call_args.args[0]
+    assert "source" in planning_prompt and "只看旧CSV" in planning_prompt
+    assert "unknown" in planning_prompt and "不按姓名" in planning_prompt
+    assert "来源核验" in planning_prompt and "不保证" in planning_prompt
+
+
+@pytest.fixture
 def conflicting_team_labels(db):
     # 436为真实冲突的最小投影；另加一条人工legacy记录验证标签与来源边界。
     schedule = {"matchID": "197", "teamID_a": "28", "teamID_b": "27",
