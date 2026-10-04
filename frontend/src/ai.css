@@ -9,13 +9,13 @@
   scroll-margin-top: 20px;
 }
 .ai-status {
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 4px 9px;
   font-size: 12px;
   font-weight: 500;
 }
 .ai-status.complete {
-  color: #00875a;
+  color: #15805f;
   background: #e8f7f1;
 }
 .ai-status.clarify,
@@ -24,13 +24,14 @@
   background: #fff5e5;
 }
 .ai-status.empty {
-  color: #4e5969;
-  background: #f2f3f5;
+  color: #52657b;
+  background: #eff3f7;
 }
 .ai-question {
   font-size: 16px;
   font-weight: 600;
   margin: 0 0 18px;
+  overflow-wrap: anywhere;
 }
 .ai-analysis-panel h3 {
   font-size: 14px;
@@ -38,9 +39,9 @@
 }
 .ai-evidence {
   padding: 16px 18px;
-  border: 1px solid #e3eaf5;
-  background: #f8fbff;
-  border-radius: 5px;
+  border: 1px solid #dce6f2;
+  background: #f6f9fd;
+  border-radius: 2px;
   margin-bottom: 18px;
 }
 .ai-scope {
@@ -48,37 +49,40 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  color: #4e5969;
+  color: #52657b;
   font-size: 13px;
 }
 .ai-scope strong {
-  color: #1d2129;
+  color: var(--ink);
 }
 .ai-sample-range {
   margin: 10px 0 0;
-  color: #4e5969;
+  color: #52657b;
   font-size: 12px;
 }
 .ai-sample-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 15px;
   margin: 18px 0 0;
 }
 .ai-sample-grid dt {
-  color: #86909c;
+  color: var(--muted);
   font-size: 12px;
 }
 .ai-sample-grid dd {
   margin: 6px 0 0;
-  font-size: 21px;
-  font-weight: 600;
+  font:
+    600 21px/1.3 Bahnschrift,
+    "Microsoft YaHei",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 .ai-sample-grid small {
   margin-left: 5px;
   font-size: 11px;
   font-weight: 400;
-  color: #86909c;
+  color: var(--muted);
 }
 .ai-date-quality {
   display: flex;
@@ -86,18 +90,18 @@
   gap: 5px 12px;
   margin: 15px 0 0;
   font-size: 12px;
-  color: #4e5969;
+  color: #52657b;
 }
 .ai-assumptions {
   padding: 14px 16px;
-  background: #fafbfc;
-  border-radius: 5px;
+  background: #f7f9fc;
+  border-radius: 2px;
   margin-top: 18px;
 }
 .ai-assumptions ul {
   padding-left: 18px;
   margin: 10px 0 0;
-  color: #4e5969;
+  color: #52657b;
   font-size: 13px;
   line-height: 1.8;
 }
@@ -105,7 +109,7 @@
   padding: 18px;
   background: #fffaf2;
   border: 1px solid #ffe8c2;
-  border-radius: 5px;
+  border-radius: 2px;
   margin-bottom: 18px;
 }
 .ai-clarification p {
@@ -122,15 +126,17 @@
   white-space: normal;
   text-align: left;
   height: auto;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .ai-analysis-panel .ai-answer {
   font-size: 14px;
 }
 .ai-interpretation {
   padding: 12px 14px;
-  background: #fafbfc;
+  background: #f7f9fc;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 2px;
   margin-top: 14px;
 }
 .ai-interpretation .ai-answer {
@@ -147,6 +153,7 @@
 .ai-chart-section,
 .ai-data-section,
 .ai-followups {
+  min-width: 0;
   padding-top: 20px;
   margin-top: 20px;
   border-top: 1px solid var(--border);
@@ -163,7 +170,7 @@
 }
 .ai-definitions {
   margin-top: 12px;
-  color: #4e5969;
+  color: #52657b;
   font-size: 12px;
 }
 .ai-definitions dl {
@@ -171,7 +178,7 @@
   grid-template-columns: auto 1fr;
   gap: 8px 16px;
   padding: 12px;
-  background: #fafbfc;
+  background: #f7f9fc;
 }
 .ai-definitions dt {
   font-weight: 600;
@@ -182,15 +189,15 @@
 .ai-sql {
   margin-top: 18px;
   padding: 12px 14px;
-  background: #fafbfc;
+  background: #f7f9fc;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 2px;
   font-size: 12px;
 }
 .ai-sql pre {
   overflow-x: auto;
   padding: 12px;
-  background: #f2f3f5;
+  background: #eff3f7;
   font-size: 12px;
 }
 .ai-followups p {
@@ -198,7 +205,7 @@
 }
 .ai-empty-note {
   padding: 14px;
-  color: #4e5969;
+  color: #52657b;
   background: #f5f6f8;
   font-size: 13px;
 }
@@ -208,7 +215,7 @@
     margin: 0 0 10px;
   }
   .ai-sample-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .ai-evidence,
   .ai-assumptions,
@@ -218,7 +225,23 @@
   .ai-question {
     font-size: 14px;
   }
+  .ai-definitions dl {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .ai-definitions dd + dt {
+    margin-top: 8px;
+  }
   .ai-sample-grid dd {
     font-size: 18px;
   }
+}
+
+.ai-evidence > summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+}
+.ai-evidence[open] > summary {
+  margin-bottom: 12px;
 }

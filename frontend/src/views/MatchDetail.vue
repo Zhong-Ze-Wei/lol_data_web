@@ -25,6 +25,14 @@ const resource = useResource(
 );
 const match = computed(() => resource.data.value?.match);
 const players = computed(() => resource.data.value?.players || []);
+const sourceLabel = computed(
+  () =>
+    ({
+      legacy: "历史 CSV",
+      scoregg: "公开战报",
+      scoregg_metadata: "官网基础数据",
+    })[match.value?.source] || "来源未记录",
+);
 const neutralSides = computed(
   () => match.value?.side_basis === "metadata_team_a_b",
 );
@@ -133,6 +141,7 @@ const damage = computed(() => {
   <RouterLink class="back-link" to="/match">← 比赛记录</RouterLink>
   <header class="page-heading">
     <div>
+      <span class="eyebrow">赛事战报</span>
       <h1>比赛详情</h1>
       <p class="match-context">
         <template v-if="match?.tournament_name"
@@ -183,7 +192,17 @@ const damage = computed(() => {
           >
         </div>
       </section>
-      <div class="analysis-grid">
+      <div class="match-section-bar">
+        <nav aria-label="本场数据栏目">
+          <a href="#match-objectives">战队统计</a>
+          <a href="#blue-roster">选手数据</a>
+          <a href="#match-damage">伤害分布</a>
+        </nav>
+        <span v-if="match.source" class="match-source-label"
+          >{{ sourceLabel }} · 来源核验不等于字段完整</span
+        >
+      </div>
+      <div id="match-objectives" class="analysis-grid">
         <section v-for="side in sides" :key="side.color" class="panel">
           <header class="panel-header">
             <h2 :class="neutralSides ? null : side.color">
@@ -212,6 +231,7 @@ const damage = computed(() => {
       </div>
       <section
         v-for="side in sides"
+        :id="`${side.color}-roster`"
         :key="`${side.color}-players`"
         class="panel section-space"
       >
@@ -273,7 +293,7 @@ const damage = computed(() => {
           </table>
         </div>
       </section>
-      <section class="panel section-space">
+      <section id="match-damage" class="panel section-space">
         <header class="panel-header">
           <div>
             <h2>对英雄总伤害</h2>
@@ -298,6 +318,51 @@ const damage = computed(() => {
 .match-context {
   overflow-wrap: anywhere;
 }
+.match-scoreboard {
+  border-top: 3px solid #102e50;
+  border-radius: 0;
+  padding: 22px;
+}
+.score-team > a {
+  max-width: 100%;
+  font-size: 28px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.score-center {
+  padding: 4px 16px;
+  border-right: 1px solid #e4e9ef;
+  border-left: 1px solid #e4e9ef;
+}
+.match-section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #e4e9ef;
+}
+.match-section-bar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  color: #1763b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+.match-source-label {
+  color: #748094;
+  font-size: 11px;
+}
+#match-objectives,
+#blue-roster,
+#red-roster,
+#match-damage {
+  scroll-margin-top: 16px;
+}
 .match-quality-notice {
   margin: 0 0 16px;
   padding: 11px 14px;
@@ -307,5 +372,23 @@ const damage = computed(() => {
   color: #865a1d;
   font-size: 12px;
   line-height: 1.7;
+}
+@media (max-width: 640px) {
+  .match-scoreboard {
+    padding: 18px 12px;
+  }
+  .score-team > a {
+    font-size: 21px;
+  }
+  .score-center {
+    padding: 0 8px;
+    border: 0;
+  }
+  .match-section-bar {
+    padding: 12px;
+  }
+  .match-section-bar nav {
+    gap: 18px;
+  }
 }
 </style>

@@ -57,7 +57,7 @@ const nav = [
   ["/player", "选手"],
   ["/team", "战队"],
   ["/hero", "英雄"],
-  ["/analytics", "数据分析"],
+  ["/analytics", "对比分析"],
 ];
 function search() {
   if (searchName.value.trim())
@@ -73,8 +73,20 @@ function search() {
     <div class="header-inner">
       <RouterLink to="/" class="brand" aria-label="LOL 赛事数据首页"
         ><span class="brand-mark">LOL</span
-        ><span>赛事数据<small>比赛 · 选手 · 战队</small></span></RouterLink
+        ><span>赛事数据<small>LEAGUE OF LEGENDS</small></span></RouterLink
       >
+      <span class="masthead-note">职业赛程 · 选手档案 · 战队数据</span>
+      <form class="header-search" @submit.prevent="search">
+        <label class="sr-only" for="global-search">搜索选手</label
+        ><input
+          id="global-search"
+          v-model="searchName"
+          type="search"
+          placeholder="搜索选手，如 Faker、Xiaohu"
+        /><button aria-label="搜索选手"><Icon name="search" /></button>
+      </form>
+    </div>
+    <div class="navigation-bar">
       <nav class="main-nav" aria-label="主导航">
         <RouterLink
           v-for="[path, label] in nav"
@@ -85,15 +97,6 @@ function search() {
           >{{ label }}</RouterLink
         >
       </nav>
-      <form class="header-search" @submit.prevent="search">
-        <label class="sr-only" for="global-search">搜索选手</label
-        ><input
-          id="global-search"
-          v-model="searchName"
-          type="search"
-          placeholder="搜索选手，如 Faker"
-        /><button aria-label="搜索选手"><Icon name="search" /></button>
-      </form>
     </div>
   </header>
   <div class="sync-bar">
@@ -138,7 +141,7 @@ function search() {
           · 每日 {{ sync.schedule.time }}（香港时间）采集</span
         ></span
       ><a
-        href="https://github.com/Zhong-Ze-Wei"
+        href="https://github.com/Zhong-Ze-Wei/lol_data_web"
         target="_blank"
         rel="noopener noreferrer"
         >GitHub</a
