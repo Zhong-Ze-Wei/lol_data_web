@@ -80,15 +80,18 @@ async function showMatch({
   const element = document.createElement("div");
   document.body.append(element);
   app = createApp({ render: () => h(RouterView) }).use(router);
+  const warnings = [];
+  app.config.warnHandler = (message) => warnings.push(message);
   app.mount(element);
   await vi.waitFor(() =>
     expect(document.querySelectorAll("tbody tr")).toHaveLength(count),
   );
+  return warnings;
 }
 
 describe("比赛详情数据质量", () => {
   it("基础战报按来源双方顺序展示，不猜红蓝方和选手位置", async () => {
-    await showMatch({
+    const warnings = await showMatch({
       count: 10,
       verified: true,
       duration: null,
@@ -113,9 +116,24 @@ describe("比赛详情数据质量", () => {
     ).toEqual(["队伍 A", "队伍 B"]);
     expect(
       [...document.querySelectorAll(".section-space h2")]
-        .map((element) => element.textContent)
+        .map((element) => element.textContent.trim())
         .filter((label) => label.endsWith("选手数据")),
     ).toEqual(["队伍 A选手数据", "队伍 B选手数据"]);
+    for (const element of document.querySelectorAll(
+      ".score-team, .analysis-grid h2, .section-space h2",
+    )) {
+      expect(element.classList.contains("blue")).toBe(false);
+      expect(element.classList.contains("red")).toBe(false);
+    }
+    expect(document.querySelectorAll(".analysis-grid .panel")).toHaveLength(2);
+    expect(
+      [...document.querySelectorAll(".section-space tbody")].map(
+        (body) => body.querySelectorAll("tr").length,
+      ),
+    ).toEqual([5, 5]);
+    expect(
+      warnings.filter((message) => /duplicate keys/i.test(message)),
+    ).toEqual([]);
     const notice = document.querySelector(".match-quality-notice").textContent;
     expect(notice).toContain("红蓝方尚未确认，双方按来源顺序展示");
     expect(notice).toContain("部分选手位置待确认");
@@ -134,6 +152,16 @@ describe("比赛详情数据质量", () => {
         (element) => element.textContent,
       ),
     ).toEqual(["蓝方", "红方"]);
+    for (const elements of [
+      document.querySelectorAll(".score-team"),
+      document.querySelectorAll(".analysis-grid h2"),
+      [...document.querySelectorAll(".section-space h2")].filter((element) =>
+        element.textContent.trim().endsWith("选手数据"),
+      ),
+    ]) {
+      expect(elements[0].classList.contains("blue")).toBe(true);
+      expect(elements[1].classList.contains("red")).toBe(true);
+    }
     expect(document.querySelector(".score-center strong").textContent).toBe(
       "30:00",
     );
