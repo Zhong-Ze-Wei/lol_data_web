@@ -120,7 +120,10 @@ const damage = computed(() => {
   <header class="page-heading">
     <div>
       <h1>比赛详情</h1>
-      <p>
+      <p class="match-context">
+        <template v-if="match?.tournament_name"
+          >{{ match.tournament_name }} ·
+        </template>
         比赛 #{{ route.params.match_id
         }}<span v-if="match"> · 已收录 {{ players.length }}/10 位选手</span>
       </p>
@@ -273,6 +276,9 @@ const damage = computed(() => {
   >
 </template>
 <style scoped>
+.match-context {
+  overflow-wrap: anywhere;
+}
 .match-quality-notice {
   margin: 0 0 16px;
   padding: 11px 14px;
