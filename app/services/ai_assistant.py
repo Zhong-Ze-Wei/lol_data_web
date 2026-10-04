@@ -17,7 +17,8 @@ from sqlglot.optimizer.scope import traverse_scope
 from app import db
 from app.services.query_compiler import chart_metadata, compile_plan, result_columns
 from app.services.query_semantics import (
-    DIMENSIONS, GRAINS, METRICS, TEAM_NAME_DEFINITION, InvalidPlan, UnsafePlan, candidate_entities, entity_catalog,
+    DIMENSIONS, GRAINS, METRICS, SOURCES, SOURCE_DEFINITION, TEAM_NAME_DEFINITION,
+    UNKNOWN_POSITION_DEFINITION, InvalidPlan, UnsafePlan, candidate_entities, entity_catalog,
     parse_plan, resolve_entities, semantic_catalog, unsupported_question, validate_context,
 )
 
@@ -155,8 +156,10 @@ def planning_system():
         "{type:clarify,question:澄清问题,choices:[{label:简短选项,prompt:完整可查询问题}]}。"
         "续问必须基于context.plan保留未被用户更改的筛选、对象和指标，明确更改的条件才修改。"
         "相对日期按today香港时间展开，date_start/date_end都是YYYY-MM-DD，结束日包含整天。"
-        "filters可用player/team/hero/position/opponent/tournament/tournament_contains字符串数组，"
-        "date_start/date_end字符串、verified_only布尔。position用a-e。"
+        "filters可用player/team/hero/position/opponent/tournament/tournament_contains/source字符串数组，"
+        "date_start/date_end字符串、verified_only布尔。position用a-e或unknown（未知位置），可并集筛选；不按姓名推断位置。"
+        "只看旧CSV使用source:[legacy]，只看官网基础元数据使用source:[scoregg_metadata]，"
+        "官网详情来源使用source:[scoregg]；来源类型与verified_only独立，均不保证字段齐全。"
         "单人/两人比较、英雄池、趋势/汇总通常min_games=1；均值/胜率排行默认min_games=10，用户明确门槛优先。"
         "按出场局数排行可min_games=1。对比Faker与Chovy选择player维度；按不同来源队伍标签比较用player/team维度。"
         "team/opponent/winner都是记录中的来源队伍标签，可能与历史赛程名称不同，"
@@ -213,7 +216,11 @@ def query_assumptions(plan, evidence, rows):
         f"核验{evidence['verified_matches']}局，未核验{evidence['unverified_matches']}局。",
         f"每组至少{plan['min_games']}次出场；最多展示{plan['limit']}组，均值不把缺失项当0。",
     ]
-    assumptions.append("来源核验不代表阵容、时长与全部指标齐全；每项指标的有效样本数另行列出。")
+    assumptions.append(SOURCE_DEFINITION)
+    if plan["filters"].get("source"):
+        assumptions.append("仅使用这些来源类型：" + "、".join(SOURCES[source] for source in plan["filters"]["source"]) + "；按比赛记录实际来源筛选。")
+    if "unknown" in plan["filters"].get("position", []) or "position" in plan["dimensions"]:
+        assumptions.append(UNKNOWN_POSITION_DEFINITION)
     ordered = METRICS[plan["subject"]].get(plan["order_by"])
     if plan["dimensions"] and plan["min_games"] >= 10 and ordered and ordered["operation"] in {"avg", "win_rate", "aggregate_kda", "binary_rate", "rate_per_min"}:
         assumptions.append(f"均值/比率榜单同时要求排序指标至少{plan['min_games']}个有效样本，避免有10次出场但仅1次指标已知的选手占据榜首。")
