@@ -1,5 +1,15 @@
 # LOL Data 整合与实测记录
 
+## 2026-10-04：公共日期确认与旧阶段来源缺口
+
+公共比赛日期仅展示 `date_source=schedule` 的值，其余显示“日期待确认”，不把更新时间当作赛程。12局虽有同号BO，双方来源ID却与原赛程冲突；香港时间11:09完成撤销日期确认，只将12条Match的 `date_source` 从 `schedule` 改为 `unknown`，不猜正确日期。八表525,764个既有主键、14,349,188个字段核对，仅12处变化；日期原值、名称、指标、来源证据、采集任务和历史状态均保留，零HTTP、AI及原件写入。随后真实只读重跑为noop，零改动，不开写连接、不创建新备份或输出文件。生产报告与重跑记录见本机 `artifacts/twelve-date-confidence-production-invocation-20261004.json`、`artifacts/twelve-date-confidence-production-readonly-repeat-20261004.json`。
+
+正式网站1440px桌面 `/match/350` 和390px手机 `/match/20233` 均显示“日期待确认”，赛事与已有阵容保留，无横向溢出、浏览器错误或AI请求；这是实际页面验收，未使用模拟API。证据见本机 `artifacts/frontend-qa/withdrawn-date-desktop-350-20261004.json`、`artifacts/frontend-qa/withdrawn-date-mobile-20233-20261004.json`。公共日期版本 `b0e020b` 通过980项完整回归（Python877、前端103）、构建、Ruff和diffcheck，Windows/Ubuntu CI37171876934通过。
+
+香港时间11:16:02对旧阶段408进行一次真实来源GET，HTTP200仍返回60个系列，BO15481与现有2022赛事归属冲突。运行146如实为 `partial`、失败1项，阶段408为 `failed`、失败计数1；59个合法系列保留，旧2017赛事的这一缺口仍未解决，不猜替代BO。八表529,510个既有主键比较，只改变阶段408的6个状态/尝试字段和59个系列的来源档案绑定及更新时间，共60个既有主键、183处变化，另新增本次运行记录；Match、Team、Player全部字段、既有SyncTask、正确归属的BO15481及阶段1186均不变。真实只读receipt复核零HTTP、数据库写入和备份。证据见本机 `artifacts/stage408-production-invocation-20261004.json`、`artifacts/stage408-production-readonly-receipt-20261004.json`；“缺口已正确记录”不代表来源已解决。
+
+上述阶段GET之前，香港时间11:15:06的读取快照显示目录275/388，113项尚未展开；目录内已核验32,205局，其中1,706局仍有来源缺项，21项真实失败并耗尽原重试预算。`verified` 表明来源已核验，缺时长等缺项仍另计；目录进度不等于比赛完整率。`discovery_complete`、`snapshot_completed`、`complete_available`均为false，后台继续补采。快照见本机 `artifacts/history-observation-20261004-1115.json`，不能用这份较早快照描述阶段408重放后的实时状态。
+
 ## 2026-10-04：阶段冲突与赛事归属修复
 
 历史阶段1186的10个系列中，BO15481曾绑定另一赛事，导致其余9个合法系列一起失败。现在先校验完整阶段，再隔离跨赛事冲突；合法系列可以独立保存并继续采集，阶段仍保留真实失败、次数与退避。坏结构、日期、重复BO和比分仍按整阶段回滚，不将部分成功标成全阶段完成。完整来源归档和旧版本保留，详见[阶段冲突处理](HISTORY-STAGE-CONFLICTS.md)。
