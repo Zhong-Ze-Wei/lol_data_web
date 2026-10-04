@@ -32,6 +32,73 @@ def atomic_json(path, value):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _canonical_source_bytes(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode('utf-8')
+
+
+def _write_new_evidence(path, encoded):
+    with path.open('xb') as file:
+        file.write(encoded)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != hashlib.sha256(encoded).hexdigest():
+        raise OSError(f'日更赛程快照写入后 SHA 不一致: {path}')
+    return {'raw_file': str(path), 'sha256': digest}
+
+
+def _row_sha256(row):
+    encoded = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _persist_daily_schedules(schedules, sources, run, raw_dir, details):
+    """全阶段原行先归档成功，再允许任何系列任务和单局导入。"""
+    directory = Path(raw_dir) / 'daily' / run.run_id
+    snapshot = {'status': 'incomplete', 'archive_basis': 'parsed_source_canonical_json',
+                'directory': str(directory), 'selected_series_count': len(schedules),
+                'conflicted_series_ids': details['conflicted_series_ids'], 'sources': []}
+    details['schedule_snapshot'] = snapshot
+    directory.mkdir(parents=True, exist_ok=False)
+    prepared = []
+    for index, source in enumerate(sources):
+        encoded = _canonical_source_bytes(source['rows'])
+        path = directory / f'stage-{index + 1:04d}.json'
+        metadata = {key: value for key, value in source.items() if key != 'rows'}
+        metadata['selected_series_ids'] = sorted(set(source['selected_series_ids']))
+        metadata['row_count'] = len(source['rows'])
+        prepared.append((metadata, path, encoded))
+    # 先持久化来源定位和预期文件摘要；中途退出仍能找回来源，但不能冒充完成快照。
+    manifest = {'version': 1, 'run_id': run.run_id, 'archive_basis': snapshot['archive_basis'],
+                'created_at_utc': datetime.now(timezone.utc).isoformat(),
+                'file_verification_required': True, 'selected_series_count': len(schedules),
+                'conflicted_series_ids': snapshot['conflicted_series_ids'],
+                'planned_sources': [{**metadata,
+                                     'expected_archive': {'raw_file': str(path), 'expected_sha256': hashlib.sha256(encoded).hexdigest()}}
+                                    for metadata, path, encoded in prepared]}
+    snapshot['manifest'] = _write_new_evidence(directory / 'manifest.json', _canonical_source_bytes(manifest))
+    for metadata, path, encoded in prepared:
+        archive = _write_new_evidence(path, encoded)
+        snapshot['sources'].append({**metadata, 'source_archive': archive})
+    for schedule in schedules:
+        rows = sources[schedule['source_index']]['rows']
+        row = schedule['source_row']
+        identifier = str(row.get('matchID'))
+        if (not identifier.isascii() or not identifier.isdigit() or int(identifier) != schedule['series_id']
+                or schedule['series_id'] < 1 or sum(item == row for item in rows) != 1):
+            raise SourceError(f"series {schedule['series_id']}: 日更赛程来源不是唯一合法原行")
+    for schedule in schedules:
+        source = snapshot['sources'][schedule['source_index']]
+        schedule['source_archive'] = source['source_archive']
+        schedule['schedule_evidence'] = {
+            'source_url': source['source_url'], 'source_cache_key': source['source_cache_key'],
+            'source_parent_round_id': source['source_parent_round_id'], 'retrieved_at_utc': source['retrieved_at_utc'],
+            'source_archive': source['source_archive'], 'canonical_row_sha256': _row_sha256(schedule['source_row']),
+            'series_id': schedule['series_id'], 'tournament_id': schedule['tournament_id'],
+            'scheduled_at': schedule['scheduled_at'].isoformat(), 'source_status': schedule['status'],
+            'is_publist': schedule.get('is_publist'), 'series_score': schedule['series_score'],
+        }
+    snapshot['status'] = 'complete'
+
+
 def _fetch_result(client, result_id, schedule, run, raw_dir, outcomes):
     start_task(result_id, schedule, run.id)
     try:
@@ -48,6 +115,8 @@ def _fetch_result(client, result_id, schedule, run, raw_dir, outcomes):
         item = mark_failure(result_id, exc, schedule, run.id).to_dict()
     except OSError as exc:
         item = mark_failure(result_id, f'原始响应归档失败: {exc}', schedule, run.id).to_dict()
+    if schedule and 'schedule_evidence' in schedule:
+        item['schedule_evidence'] = schedule['schedule_evidence']
     outcomes.append(item)
     return item
 
@@ -62,17 +131,19 @@ def _series_pending_reason(schedule, now):
 
 
 def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
+    source_context = {'schedule_evidence': schedule['schedule_evidence']} if 'schedule_evidence' in schedule else {}
     pending_reason = _series_pending_reason(schedule, now)
     if pending_reason:
         task = finish_task(None, 'pending', pending_reason, schedule, run.id)
         db.session.commit()
         outcomes.append({'series_id': schedule['series_id'], 'status': 'pending', 'error': task.last_error,
                          'source_status': schedule.get('status'), 'is_publist': schedule.get('is_publist'),
-                         'series_score': schedule.get('series_score')})
+                         'series_score': schedule.get('series_score'), **source_context})
         return
     existing = get_task(schedule=schedule, run_id=run.id)
     if existing.status == 'failed' and existing.failure_count >= max_attempts:
-        outcomes.append({'series_id': schedule['series_id'], 'status': 'failed', 'error': '系列赛已达到持久失败重试上限'})
+        outcomes.append({'series_id': schedule['series_id'], 'status': 'failed', 'error': '系列赛已达到持久失败重试上限',
+                         **source_context})
         db.session.commit()
         return
     start_task(schedule=schedule, run_id=run.id)
@@ -84,14 +155,16 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
     except SourceError as exc:
         if isinstance(exc, SourceHTTPError) and exc.status_code == 404 and schedule.get('status') == '1':
             outcomes.append({**mark_failure(None, '进行中系列尚未发布结果列表；次日复查', schedule, run.id, status='pending').to_dict(),
-                             'series_id': schedule['series_id']})
+                             'series_id': schedule['series_id'], **source_context})
             return
-        outcomes.append({**mark_failure(None, exc, schedule, run.id).to_dict(), 'series_id': schedule['series_id']})
+        outcomes.append({**mark_failure(None, exc, schedule, run.id).to_dict(), 'series_id': schedule['series_id'],
+                         **source_context})
         return
     if not result_ids:
         finish_task(None, 'pending', '系列赛尚无单局结果；次日复查', schedule, run.id)
         db.session.commit()
-        outcomes.append({'series_id': schedule['series_id'], 'status': 'pending', 'error': '系列赛尚无单局结果'})
+        outcomes.append({'series_id': schedule['series_id'], 'status': 'pending', 'error': '系列赛尚无单局结果',
+                         **source_context})
         return
     for result_id in result_ids:
         get_task(result_id, schedule, run.id)
@@ -100,7 +173,8 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
     for result_id in result_ids:
         task = get_task(result_id, schedule, run.id)
         if task.status == 'failed' and task.failure_count >= max_attempts:
-            outcomes.append({'result_id': result_id, 'status': 'failed', 'error': '已达到持久失败重试上限；检查任务后显式提高 --max-attempts'})
+            outcomes.append({'result_id': result_id, 'status': 'failed', 'error': '已达到持久失败重试上限；检查任务后显式提高 --max-attempts',
+                             **source_context})
             continue
         _fetch_result(client, result_id, schedule, run, raw_dir, outcomes)
 
@@ -153,16 +227,19 @@ def run_pipeline(command, *, client=None, start=None, end=None, data_dir=None,
         elif command == 'daily':
             schedules, discovered = discover_series(client, now, window_days, tournament_ids,
                                                     discovery_requests=max(1, min(120, client.budget.max_requests // 3)))
+            sources = discovered.pop('_schedule_sources')
             details.update(discovered)
             details['window_start'] = (now - timedelta(days=window_days)).isoformat()
             details['window_end'] = now.isoformat()
+            _persist_daily_schedules(schedules, sources, run, raw_dir, details)
             for schedule in schedules:
                 reason = _series_pending_reason(schedule, now)
                 if reason:
                     finish_task(None, 'pending', reason, schedule, run.id)
                     outcomes.append({'series_id': schedule['series_id'], 'status': 'pending', 'error': reason,
                                      'source_status': schedule.get('status'), 'is_publist': schedule.get('is_publist'),
-                                     'series_score': schedule.get('series_score')})
+                                     'series_score': schedule.get('series_score'),
+                                     'schedule_evidence': schedule['schedule_evidence']})
                 else:
                     get_task(schedule=schedule, run_id=run.id)
             db.session.commit()
