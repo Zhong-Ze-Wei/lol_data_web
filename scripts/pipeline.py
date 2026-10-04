@@ -15,7 +15,10 @@ from app.models.match import Match
 from app.services.ingestion import get_task, start_task, finish_task, ingest_result, mark_failure
 from app.services.legacy_import import import_legacy
 from app.services.history import run_history
-from app.services.spider import BudgetExceeded, RequestBudget, ScoreGGClient, SourceError, SourceHTTPError, discover_series
+from app.services.spider import (
+    BudgetExceeded, RequestBudget, ScoreGGClient, SourceError, SourceHTTPError, discover_series,
+    metadata_result_list_after_404, result_ids_from_list,
+)
 from scripts.pipeline_lock import AlreadyRunning, PipelineLock
 
 
@@ -148,7 +151,14 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
         return
     start_task(schedule=schedule, run_id=run.id)
     try:
-        result_ids = client.get_result_ids(schedule['series_id'])
+        try:
+            result_ids = client.get_result_ids(schedule['series_id'])
+        except SourceHTTPError as exc:
+            if exc.status_code != 404 or schedule.get('status') == '1':
+                raise
+            payload, evidence = metadata_result_list_after_404(client, schedule, raw_dir, exc)
+            result_ids = result_ids_from_list(payload, schedule['series_id'])
+            source_context['resultlist_evidence'] = evidence
     except BudgetExceeded as exc:
         mark_failure(None, exc, schedule, run.id, status='queued')
         raise
@@ -168,8 +178,12 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
         return
     for result_id in result_ids:
         get_task(result_id, schedule, run.id)
-    finish_task(None, 'imported', schedule=schedule, run_id=run.id)
+    incomplete = source_context.get('resultlist_evidence', {}).get('list_complete') is False
+    finish_task(None, 'pending' if incomplete else 'imported', schedule=schedule, run_id=run.id)
     db.session.commit()
+    if 'resultlist_evidence' in source_context:
+        outcomes.append({'series_id': schedule['series_id'], 'status': 'pending' if incomplete else 'discovered',
+                         **source_context})
     for result_id in result_ids:
         task = get_task(result_id, schedule, run.id)
         if task.status == 'failed' and task.failure_count >= max_attempts:

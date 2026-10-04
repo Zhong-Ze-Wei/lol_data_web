@@ -20,7 +20,7 @@ from app.services.ingestion import (
 )
 from app.services.spider import (
     BudgetExceeded, SourceError, SourceHTTPError, history_schedule, parse_tournament_page,
-    result_ids_from_list, tournament_catalog, tournament_stages,
+    metadata_result_list, metadata_result_list_after_404, result_ids_from_list, tournament_catalog, tournament_stages,
 )
 from app.services.team_names import resolve_team_names
 
@@ -349,29 +349,65 @@ def _queue_series_results(series, raw_dir):
             task.status, task.next_retry_at = 'queued', None
 
 
+def _cached_metadata_resultlist(series, schedule, raw_dir):
+    if not series.raw_file or not series.raw_sha256:
+        return None
+    path = Path(series.raw_file)
+    directory = Path(raw_dir) / 'history' / 'resultlist-fallback' / str(series.series_id)
+    if not path.resolve().is_relative_to(directory.resolve()):
+        return None
+    encoded = path.read_bytes()
+    if hashlib.sha256(encoded).hexdigest() != series.raw_sha256:
+        raise SourceError('已归档 metadata 响应 SHA 与持久来源不一致')
+    row_sha = hashlib.sha256(json.dumps(schedule.get('source_row'), ensure_ascii=False,
+                                       sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+    for manifest in path.parent.glob('evidence-*.json'):
+        evidence = json.loads(manifest.read_bytes())
+        if (evidence.get('status') == 'validated' and evidence.get('raw_file') == str(path)
+                and evidence.get('sha256') == series.raw_sha256):
+            if evidence.get('schedule_row_sha256') != row_sha:
+                return None
+            payload, complete = metadata_result_list(json.loads(encoded), schedule)
+            if not complete:
+                return None
+            return payload, {**evidence, 'evidence_file': str(manifest), 'reused_raw': True}
+    raise SourceError('已归档 metadata 缺少独立 CDN404/验证来源记录')
+
+
 def _discover_resultlist(client, series, raw_dir, now):
     if _pending(series.schedule(), now):
         _finish(series, 'pending', '官网待赛或单局战报尚未发布，未请求 resultlist')
         return
     _start(series)
+    schedule = series.schedule()
+    fallback = _cached_metadata_resultlist(series, schedule, raw_dir)
+    evidence = None
     try:
-        payload = client.get_result_list(series.series_id)
+        if fallback is not None:
+            payload, evidence = fallback
+        else:
+            payload = client.get_result_list(series.series_id)
     except SourceHTTPError as exc:
         if exc.status_code == 404 and series.source_status == '1':
             _finish(series, 'pending', '进行中系列尚未发布 resultlist，HTTP404 已审计')
             return
-        raise
+        payload, evidence = metadata_result_list_after_404(client, schedule, raw_dir, exc)
     ids = result_ids_from_list(payload, series.series_id)
-    raw = _archive(raw_dir / 'history' / 'resultlists' / f'{series.series_id}.json', payload)
+    raw = ((evidence['raw_file'], evidence['sha256']) if evidence is not None
+           else _archive(raw_dir / 'history' / 'resultlists' / f'{series.series_id}.json', payload))
     series.result_ids = json.dumps(ids)
     if not ids:
         _finish(series, 'pending', '已发布系列暂无单局 ID；保留空列表依据', raw)
-        return
+        return {'status': 'pending', 'resultlist_evidence': evidence} if evidence is not None else None
     _queue_series_results(series, raw_dir)
-    if series.source_status == '1':
+    if evidence is not None and not evidence['list_complete']:
+        _finish(series, 'pending', 'metadata 已发现部分单局，但与最终比分数量尚不完整；继续待发布', raw)
+    elif series.source_status == '1':
         _finish(series, 'pending', '进行中系列已发现当前单局；下一次刷新继续读取发布清单', raw)
     else:
         _finish(series, 'discovered', raw=raw)
+    if evidence is not None:
+        return {'status': series.status, 'resultlist_evidence': evidence}
 
 
 def _pending_stage_refreshes(max_attempts, *, due_only=True):
@@ -839,7 +875,9 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                     if kind == 'result':
                         outcomes.append(_fetch_task(client, entity, raw_dir, run.id, now))
                     elif kind == 'series':
-                        _discover_resultlist(client, entity, raw_dir, now)
+                        outcome = _discover_resultlist(client, entity, raw_dir, now)
+                        if outcome is not None:
+                            outcomes.append({**current, **outcome})
                     elif kind == 'stage':
                         outcome = _discover_stage(client, entity, raw_dir, now)
                         if outcome is not None:
@@ -902,7 +940,9 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                 client.budget.check()
                 current = {'entity': 'series', 'id': series.series_id}
                 try:
-                    _discover_resultlist(client, series, raw_dir, now)
+                    outcome = _discover_resultlist(client, series, raw_dir, now)
+                    if outcome is not None:
+                        outcomes.append({**current, **outcome})
                 except (SourceError, OSError, ValueError) as exc:
                     if isinstance(exc, BudgetExceeded):
                         raise
