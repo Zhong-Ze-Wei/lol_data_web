@@ -4,7 +4,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 import requests
@@ -219,6 +219,61 @@ def _schedule_date(row):
         raise SourceError(f"series {row.get('matchID')}: 无效赛程日期 {date} {clock}") from exc
 
 
+def _schedule_identity(schedule):
+    """只比较采集和队名选择实际依赖的业务值；A/B 换位按来源 ID 对齐。"""
+    row = schedule['source_row']
+    teams = []
+    for side in ('a', 'b'):
+        identifier = str(row.get(f'teamID_{side}') or '').strip()
+        identifier = int(identifier) if identifier.isascii() and identifier.isdigit() else identifier
+        name = row.get(f'team_short_name_{side}')
+        score = row.get(f'team_{side}_win')
+        teams.append((identifier, name.strip() if isinstance(name, str) else name,
+                      str(score).strip() if score not in (None, '') else None))
+    if all(isinstance(team[0], int) and team[0] > 0 for team in teams) and teams[0][0] != teams[1][0]:
+        teams.sort(key=lambda team: team[0])
+    publication = schedule.get('is_publist')
+    return (schedule['tournament_id'], schedule['scheduled_at'], schedule['status'],
+            str(publication) if publication not in (None, '') else None,
+            tuple(teams), bool(row.get('more_team_list')))
+
+
+def _check_selected_schedule_sources(schedules, sources, errors):
+    """只核验已选 BO 的全部已读声明；窗外其他 BO 不进入本次任务范围。"""
+    selected_ids = set(schedules)
+    identities = {}
+    conflicted = set()
+    for source in sources:
+        seen = set()
+        for row in source['rows']:
+            identifier = str(row.get('matchID'))
+            if not identifier.isascii() or not identifier.isdigit():
+                continue
+            sid = int(identifier)
+            if sid not in selected_ids or sid in conflicted:
+                continue
+            previous = identities.get(sid)
+            try:
+                identity = _schedule_identity({
+                    'tournament_id': source['tournament_id'], 'scheduled_at': _schedule_date(row),
+                    'status': str(row.get('status', '')), 'is_publist': row.get('is_publist'), 'source_row': row})
+                reason = '赛程原行重复或业务身份/状态冲突' if (
+                    sid in seen or previous is not None and previous[0] != identity) else None
+            except SourceError as exc:
+                reason = str(exc)
+            if reason:
+                conflicted.add(sid)
+                schedules.pop(sid)
+                errors.append({'tournament_id': source['tournament_id'], 'series_id': sid,
+                               'error': f'series {sid}: {reason}；不选择任一来源',
+                               'source_url': source['source_url'],
+                               'previous_source_url': previous[1] if previous else None})
+            else:
+                identities[sid] = (identity, source['source_url'])
+            seen.add(sid)
+    return sorted(conflicted)
+
+
 def discover_series(client, now, window_days=14, tournament_ids=None, max_tournaments=12,
                     discovery_requests=None):
     """只读取活跃/近期赛事的阶段；matchID 是 BO 系列，不能充当 resultID。"""
@@ -250,6 +305,7 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
             selected.append((start, tid, tour))
     selected.sort(reverse=True, key=lambda item: item[0])
     schedules = {}
+    schedule_sources = []
     latest = None
     latest_published = None
     unpublished_stages = []
@@ -275,7 +331,8 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
                             deferred_tournaments.append(tid)
                         break
                     try:
-                        rows = client.get_json(f'https://img.scoregg.com/tr_round/{key}.json')
+                        source_url = f'https://img.scoregg.com/tr_round/{key}.json'
+                        rows = client.get_json(source_url)
                     except SourceHTTPError as exc:
                         # 官方父阶段占位存在但缓存尚未发布：只有官网统计阶段也未发布才可待发布。
                         if exc.status_code != 404 or children or str(stage.get('is_now_week')) == '1':
@@ -293,6 +350,12 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
                         continue
                     if not isinstance(rows, list):
                         raise SourceError(f'round {key}: 赛程结构不是列表')
+                    source_index = len(schedule_sources)
+                    source = {'tournament_id': tid, 'source_url': source_url, 'source_cache_key': key,
+                              'source_parent_round_id': stage.get('roundID'),
+                              'retrieved_at_utc': datetime.now(timezone.utc).isoformat(),
+                              'rows': rows, 'selected_series_ids': []}
+                    schedule_sources.append(source)
                     for row in rows:
                         date = _schedule_date(row)
                         latest_published = date if latest_published is None or date > latest_published else latest_published
@@ -308,14 +371,17 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
                                 'is_publist': row.get('is_publist'),
                                 'series_score': [row.get('team_a_win'), row.get('team_b_win')],
                                 'source_row': row,
+                                'source_index': source_index, 'source_url': source_url,
+                                'source_cache_key': key, 'source_parent_round_id': stage.get('roundID'),
+                                'retrieved_at_utc': source['retrieved_at_utc'],
                             }
-                            if sid in schedules and schedules[sid]['tournament_id'] != tid:
-                                raise SourceError(f'series {sid} 被不同赛事引用，停止错误关联')
+                            source['selected_series_ids'].append(sid)
                             schedules[sid] = schedule
         except BudgetExceeded:
             raise
         except (SourceError, KeyError, TypeError, ValueError) as exc:
             errors.append({'tournament_id': tid, 'error': str(exc)})
+    conflicted_series = _check_selected_schedule_sources(schedules, schedule_sources, errors)
     return sorted(schedules.values(), key=lambda item: item['scheduled_at'], reverse=True), {
         'selected_tournaments': len(selected[:max_tournaments]),
         'discovered_series': len(schedules),
@@ -327,6 +393,9 @@ def discover_series(client, now, window_days=14, tournament_ids=None, max_tourna
         'unpublished_stages': unpublished_stages,
         'discovery_limited': discovery_limited,
         'deferred_tournaments': deferred_tournaments,
+        'conflicted_series_ids': conflicted_series,
+        # 临时完整 parsed 来源仅供 pipeline 处理前归档，不直接写入运行报告。
+        '_schedule_sources': schedule_sources,
     }
 
 
