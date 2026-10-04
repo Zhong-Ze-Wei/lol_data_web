@@ -692,7 +692,7 @@ def recover_interrupted_history():
 
 
 def _next_all(max_attempts):
-    """先完成最早赛事的已有单局，再扩展同赛事系列/阶段，最后进入下一赛事。"""
+    """优先最近已知日期赛事；先完成其已有单局/系列/阶段，未知日期最后。"""
     tours = _ready(db.session.query(HistoryTournament.tournament_id.label('tournament_id')), HistoryTournament, max_attempts)
     stages = _ready(db.session.query(HistoryStage.tournament_id.label('tournament_id')), HistoryStage, max_attempts)
     series = _ready(db.session.query(HistorySeries.tournament_id.label('tournament_id')), HistorySeries, max_attempts)
@@ -701,25 +701,28 @@ def _next_all(max_attempts):
     work = tours.union(stages, series, results).subquery()
     tour = db.session.query(HistoryTournament).filter(HistoryTournament.tournament_id.in_(
         db.session.query(work.c.tournament_id))).order_by(HistoryTournament.start_date.is_(None),
-                                                        HistoryTournament.start_date, HistoryTournament.tournament_id).first()
+                                                        HistoryTournament.start_date.desc(), HistoryTournament.tournament_id).first()
     if tour is not None:
         task = _ready(db.session.query(SyncTask).filter_by(tournament_id=tour.tournament_id).filter(
             SyncTask.result_id.is_not(None)), SyncTask, max_attempts, include_pending=True).order_by(
-                SyncTask.scheduled_at, SyncTask.result_id).first()
+                SyncTask.scheduled_at.is_(None), SyncTask.scheduled_at.desc(), SyncTask.result_id).first()
         if task is not None:
             return 'result', task
         item = _ready(db.session.query(HistorySeries).filter_by(tournament_id=tour.tournament_id),
-                      HistorySeries, max_attempts).order_by(HistorySeries.scheduled_at, HistorySeries.series_id).first()
+                      HistorySeries, max_attempts).order_by(HistorySeries.scheduled_at.is_(None),
+                                                          HistorySeries.scheduled_at.desc(), HistorySeries.series_id).first()
         if item is not None:
             return 'series', item
         item = _ready(db.session.query(HistoryStage).filter_by(tournament_id=tour.tournament_id),
                       HistoryStage, max_attempts).order_by(HistoryStage.id).first()
         return ('stage', item) if item is not None else ('tournament', tour)
     task = _ready(db.session.query(SyncTask).filter(SyncTask.result_id.is_not(None)), SyncTask,
-                  max_attempts, include_pending=True).order_by(SyncTask.result_id).first()
+                  max_attempts, include_pending=True).order_by(
+                      SyncTask.scheduled_at.is_(None), SyncTask.scheduled_at.desc(), SyncTask.result_id).first()
     if task is None and _seed_known_legacy():
         task = _ready(db.session.query(SyncTask).filter(SyncTask.result_id.is_not(None)), SyncTask,
-                      max_attempts, include_pending=True).order_by(SyncTask.result_id).first()
+                      max_attempts, include_pending=True).order_by(
+                          SyncTask.scheduled_at.is_(None), SyncTask.scheduled_at.desc(), SyncTask.result_id).first()
     return ('result', task) if task is not None else (None, None)
 
 
@@ -901,7 +904,7 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
         if phase == 'discover':
             while True:
                 tour = _ready(db.session.query(HistoryTournament), HistoryTournament, max_attempts).order_by(
-                    HistoryTournament.start_date.is_(None), HistoryTournament.start_date, HistoryTournament.tournament_id).first()
+                    HistoryTournament.start_date.is_(None), HistoryTournament.start_date.desc(), HistoryTournament.tournament_id).first()
                 if tour is None:
                     break
                 client.budget.check()
@@ -916,7 +919,7 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                     outcomes.append({**current, 'status': 'failed', 'error': str(exc)})
             while True:
                 stage = _ready(db.session.query(HistoryStage), HistoryStage, max_attempts).join(
-                    HistoryTournament).order_by(HistoryTournament.start_date.is_(None), HistoryTournament.start_date,
+                    HistoryTournament).order_by(HistoryTournament.start_date.is_(None), HistoryTournament.start_date.desc(),
                                                 HistoryStage.tournament_id, HistoryStage.id).first()
                 if stage is None:
                     break
@@ -934,7 +937,7 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                     outcomes.append({**current, 'status': 'failed', 'error': str(exc)})
             while True:
                 series = _ready(db.session.query(HistorySeries), HistorySeries, max_attempts).order_by(
-                    HistorySeries.scheduled_at.is_(None), HistorySeries.scheduled_at, HistorySeries.series_id).first()
+                    HistorySeries.scheduled_at.is_(None), HistorySeries.scheduled_at.desc(), HistorySeries.series_id).first()
                 if series is None:
                     break
                 client.budget.check()
@@ -954,7 +957,7 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
             while True:
                 task = _ready(db.session.query(SyncTask).filter(SyncTask.result_id.is_not(None)), SyncTask,
                               max_attempts, include_pending=True).order_by(
-                    SyncTask.scheduled_at.is_(None), SyncTask.scheduled_at, SyncTask.result_id).first()
+                    SyncTask.scheduled_at.is_(None), SyncTask.scheduled_at.desc(), SyncTask.result_id).first()
                 if task is None:
                     if _seed_known_legacy() == 0:
                         break

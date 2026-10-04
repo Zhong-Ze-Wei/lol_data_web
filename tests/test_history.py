@@ -239,7 +239,7 @@ def test_global_interval_includes_all_urls_and_retry_attempts():
     assert session.times == [0, 1, 2, 3]
 
 
-def test_all_first_small_batch_imports_oldest_tournament_and_next_batch_continues(db, result, tmp_path):
+def test_all_first_small_batch_imports_newest_tournament_and_next_batch_continues(db, result, tmp_path):
     class TwoTournaments(HistoricalSource):
         def get(self, url):
             self._call(url)
@@ -267,15 +267,134 @@ def test_all_first_small_batch_imports_oldest_tournament_and_next_batch_continue
     first = TwoTournaments(result, budget=5)
     report, code = run(first, tmp_path)
     assert code == 4 and report['imported'] == 1
-    assert db.session.query(Match).one().date.year == 2011
-    assert db.session.get(HistoryTournament, 149).status == 'queued'
+    assert db.session.query(Match).one().date.year == 2012
+    assert db.session.get(HistoryTournament, 333).status == 'queued'
     second = TwoTournaments(result, budget=4)
     report, code = run(second, tmp_path)
     assert code == 0 and report['imported'] == 1
-    assert second.calls[0].endswith('/tr/149.json')
-    assert not any('/333.' in url or '66845' in url or '20674' in url for url in second.calls)
+    assert second.calls[0].endswith('/tr/333.json')
+    assert not any('/149.' in url or '18691' in url or '8905' in url for url in second.calls)
     assert {match.date.year for match in db.session.query(Match)} == {2011, 2012}
     assert db.session.query(Player).count() == 20
+
+
+@pytest.mark.parametrize('phase', ['all', 'discover'])
+def test_recent_catalog_is_read_first_and_unknown_dates_remain_last(db, result, tmp_path, phase):
+    for tid, start in ((719, datetime(2024, 6, 12).date()), (973, datetime(2026, 4, 1).date()), (1, None)):
+        db.session.add(HistoryTournament(tournament_id=tid, name=str(tid), start_date=start,
+                                         status='queued', last_seen_at=utc_now()))
+    db.session.commit()
+
+    class EmptyRounds(HistoricalSource):
+        def get_json(self, url):
+            self._call(url)
+            assert '/tr/' in url
+            return []
+
+    client = EmptyRounds(result)
+    report, code = run(client, tmp_path, phase=phase)
+    assert code == 0 and client.calls == [f'https://img.scoregg.com/tr/{tid}.json' for tid in (973, 719, 1)]
+    assert report['details']['coverage']['has_runnable_work'] is False
+
+
+def test_recent_tournament_unfinished_results_series_and_stage_precede_older_catalog(db):
+    db.session.add_all([
+        HistoryTournament(tournament_id=719, name='old', start_date=datetime(2024, 6, 12).date(), status='queued'),
+        HistoryTournament(tournament_id=973, name='recent', start_date=datetime(2026, 4, 1).date(), status='discovered'),
+    ])
+    db.session.flush()
+    stage = HistoryStage(tournament_id=973, cache_key='p_973', parent_round_id=973, status='queued')
+    db.session.add(stage)
+    db.session.flush()
+    series = HistorySeries(series_id=9730, tournament_id=973, stage_id=stage.id,
+                           scheduled_at=datetime(2026, 5, 1), status='queued')
+    task = SyncTask(task_key='result:97300', result_id=97300, series_id=9730, tournament_id=973,
+                    scheduled_at=series.scheduled_at, status='queued')
+    db.session.add_all([series, task])
+    db.session.commit()
+    assert history._next_all(5) == ('result', task)
+    task.status = 'source_incomplete'
+    db.session.commit()
+    assert history._next_all(5) == ('series', series)
+    series.status = 'discovered'
+    db.session.commit()
+    assert history._next_all(5) == ('stage', stage)
+    stage.status = 'discovered'
+    db.session.commit()
+    assert history._next_all(5) == ('tournament', db.session.get(HistoryTournament, 719))
+
+
+def test_recent_priority_keeps_exhausted_and_backoff_ineligible_without_retry_spin(db, result, tmp_path):
+    tomorrow = utc_now() + timedelta(days=1)
+    exhausted = HistoryTournament(tournament_id=973, name='exhausted', start_date=datetime(2026, 4, 1).date(),
+                                  status='failed', failure_count=5, attempts=5, last_seen_at=utc_now())
+    waiting = HistoryTournament(tournament_id=927, name='waiting', start_date=datetime(2026, 1, 1).date(),
+                                status='failed', failure_count=2, attempts=2, next_retry_at=tomorrow,
+                                last_seen_at=utc_now())
+    old = HistoryTournament(tournament_id=719, name='old', start_date=datetime(2024, 6, 12).date(),
+                            status='queued', last_seen_at=utc_now())
+    db.session.add_all([exhausted, waiting, old])
+    db.session.commit()
+    assert history._next_all(5) == ('tournament', old)
+    old.status = 'discovered'
+    db.session.commit()
+    before = [(tour.status, tour.failure_count, tour.attempts, tour.next_retry_at) for tour in (exhausted, waiting)]
+    assert history._next_all(5) == (None, None)
+    client = HistoricalSource(result)
+    report, code = run(client, tmp_path)
+    assert code == 2 and report['status'] == 'waiting_retry' and client.calls == []
+    assert [(tour.status, tour.failure_count, tour.attempts, tour.next_retry_at) for tour in (exhausted, waiting)] == before
+    assert report['details']['coverage']['has_runnable_work'] is False
+    assert report['details']['coverage']['failed_tasks'] == 2
+
+
+@pytest.mark.parametrize('phase', ['all', 'fetch'])
+def test_unmapped_results_use_recent_schedule_first_without_refetching_terminal_rows(db, result, tmp_path, phase):
+    db.session.add(HistoryTournament(tournament_id=973, name='catalog already read',
+                                     status='discovered', last_seen_at=utc_now()))
+    db.session.add_all([
+        SyncTask(task_key='result:5', result_id=5, scheduled_at=datetime(2024, 6, 12), status='queued'),
+        SyncTask(task_key='result:55', result_id=55, scheduled_at=datetime(2026, 4, 1), status='queued'),
+        SyncTask(task_key='result:1', result_id=1, scheduled_at=None, status='queued'),
+        SyncTask(task_key='result:998', result_id=998, scheduled_at=datetime(2026, 5, 1), status='imported'),
+        SyncTask(task_key='result:999', result_id=999, scheduled_at=datetime(2026, 5, 1), status='source_incomplete'),
+    ])
+    db.session.commit()
+
+    class NonLOL(HistoricalSource):
+        def get_result(self, rid):
+            self._call(f'result/{rid}')
+            return {'code': 200, 'data': {'gameID': '2', 'resultID': rid}}
+
+    client = NonLOL(result)
+    assert run(client, tmp_path, phase=phase)[1] == 0
+    assert client.calls == ['result/55', 'result/5', 'result/1']
+    assert db.session.query(SyncTask).filter_by(result_id=998).one().status == 'imported'
+    assert db.session.query(SyncTask).filter_by(result_id=999).one().status == 'source_incomplete'
+
+
+def test_discover_resultlists_use_recent_schedule_then_unknown_without_guessing_missing_ids(db, result, tmp_path):
+    db.session.add(HistoryTournament(tournament_id=973, name='recent', status='discovered', last_seen_at=utc_now()))
+    db.session.flush()
+    stage = HistoryStage(tournament_id=973, cache_key='p_973', parent_round_id=973, status='discovered')
+    db.session.add(stage)
+    db.session.flush()
+    for sid, date in ((5, datetime(2024, 6, 12)), (55, datetime(2026, 4, 1)), (1, None)):
+        db.session.add(HistorySeries(series_id=sid, tournament_id=973, stage_id=stage.id,
+                                     scheduled_at=date, source_status='2', is_publist=1, status='queued'))
+    db.session.commit()
+
+    class EmptyResults(HistoricalSource):
+        def get_result_list(self, sid):
+            self._call(f'resultlist/{sid}')
+            return {'code': 200, 'data': []}
+
+    client = EmptyResults(result)
+    report, code = run(client, tmp_path, phase='discover')
+    assert code == 0 and client.calls == ['resultlist/55', 'resultlist/5', 'resultlist/1']
+    assert db.session.query(HistorySeries).filter_by(status='pending').count() == 3
+    assert db.session.query(SyncTask).count() == 0
+    assert report['details']['coverage']['complete_available'] is False
 
 
 def test_exhausted_failure_stays_visible_without_past_retry_spin(db, result, tmp_path):
@@ -567,7 +686,8 @@ def test_result_id_in_two_series_is_reported_without_overwriting_good_associatio
         def get_json(self, url):
             rows = super().get_json(url)
             if '/tr_round/' in url:
-                second = dict(rows[0], matchID='20709', match_time='17:45')
+                # 先建立有效关联，再发现更早系列的重复声明；跨系列覆盖仍须拒绝。
+                second = dict(rows[0], matchID='20709', match_time='15:45')
                 rows.append(second)
             return rows
     report, code = run(ConflictingResults(result), tmp_path)
