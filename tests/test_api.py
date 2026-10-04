@@ -197,6 +197,40 @@ def test_player_record_date_does_not_expose_source_update_as_match_date(client, 
     assert player_record['date_source'] == match_record['date_source'] == 'updated_at'
 
 
+@pytest.mark.parametrize('date_source,verified,public_date', [
+    ('updated_at', False, None),
+    ('unknown', False, None),
+    (None, False, None),
+    ('unknown', True, None),
+    ('schedule', True, '2024-01-15'),
+])
+def test_public_match_dates_require_confirmed_schedule_without_changing_stored_records(
+        client, db, date_source, verified, public_date):
+    match = add_match(db, 101, date=datetime(2024, 1, 15, 19, 30),
+                      date_source=date_source, verified=verified, game_time=1800)
+    db.session.commit()
+    columns = [column.key for column in Match.__table__.columns]
+    stored_before = tuple(getattr(match, column) for column in columns)
+
+    detail = client.get('/match/api/101')
+    assert detail.status_code == 200
+    records = [detail.json['match']]
+    for path in ('/match/api/list', '/api/fastest-matches', '/api/longest-matches'):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert len(response.json['matches']) == 1
+        records.append(response.json['matches'][0])
+    for record in records:
+        assert record['match_id'] == 101
+        assert record['date'] == public_date
+        assert record['date_source'] == date_source
+        assert record['verified'] == verified
+
+    db.session.expire_all()
+    stored_after = db.session.query(Match).filter_by(match_id=101).one()
+    assert tuple(getattr(stored_after, column) for column in columns) == stored_before
+
+
 def test_one_second_placeholder_is_not_a_fastest_match_or_real_display_duration(client, db):
     add_match(db, 1, date=datetime(2024, 1, 1), date_source='schedule', game_time=1)
     add_match(db, 2, date=datetime(2024, 1, 2), date_source='schedule', game_time=1800)
