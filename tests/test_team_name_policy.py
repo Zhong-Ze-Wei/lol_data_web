@@ -248,14 +248,15 @@ def test_no_schedule_refresh_retains_previously_verified_historical_labels(db, n
     assert db.session.query(Player).filter_by(team_name='历史LGD', position='a').one().kills == 9
 
 
-def test_explicit_conflicting_schedule_does_not_inherit_previous_label_proof(db, named_source):
+def test_explicit_conflicting_schedule_preserves_previous_business_binding(db, named_source):
     payload, schedule = named_source
     assert ingest_result(payload, 66845, schedule).status == 'imported'
+    before = copy.deepcopy(db.session.query(Match).one().team_name_provenance)
     schedule['source_row']['teamID_a'] = '704'
-    assert ingest_result(payload, 66845, schedule).status == 'imported'
+    assert ingest_result(payload, 66845, schedule).status == 'failed'
     match = db.session.query(Match).one()
-    assert match.red_team_name == 'LGD' and match.blue_team_name == 'EDG'
-    assert match.team_name_provenance['reason'] == 'team_identity_mismatch'
+    assert match.red_team_name == '历史LGD' and match.blue_team_name == '历史EDG'
+    assert match.team_name_provenance == before
 
 
 def test_changed_detail_identity_does_not_reuse_previous_schedule(db, named_source):

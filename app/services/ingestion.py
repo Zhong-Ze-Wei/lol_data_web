@@ -204,6 +204,37 @@ def _clear_missing_metric_groups(info, teams, players):
     return invalid_groups
 
 
+def _known_identity_id(value):
+    text = str(value).strip() if value is not None else ''
+    return int(text) if text.isascii() and text.isdigit() and int(text) > 0 else None
+
+
+def _check_schedule_binding(schedule, info, detail_series_id):
+    """只拒绝明确原行中的已知身份矛盾；缺项不能遮住其它已知冲突。"""
+    row = schedule.get('source_row')
+    if not isinstance(row, dict):
+        return
+    series_ids = [_known_identity_id(value) for value in
+                  (detail_series_id, schedule.get('series_id'), row.get('matchID'))]
+    if len({identifier for identifier in series_ids if identifier is not None}) > 1:
+        raise InvalidResult('赛程 BO 身份冲突：详情、声明系列与原行 ID 不一致')
+    detail_ids = tuple(_known_identity_id(info.get(f'{side}_teamID')) for side in ('red', 'blue'))
+    schedule_ids = tuple(_known_identity_id(row.get(f'teamID_{side}')) for side in ('a', 'b'))
+    auxiliary_ids = tuple(_known_identity_id(info.get(f'teamID_{side}')) for side in ('a', 'b'))
+    for label, identifiers in (('详情', detail_ids), ('赛程', schedule_ids)):
+        if None not in identifiers and len(set(identifiers)) != 2:
+            raise InvalidResult(f'{label}双方队伍身份重复')
+    if None not in detail_ids:
+        for label, identifiers in (('赛程', schedule_ids), ('辅助', auxiliary_ids)):
+            if any(identifier is not None and identifier not in detail_ids for identifier in identifiers):
+                raise InvalidResult(f'{label}队伍身份不属于详情双方')
+        if None not in auxiliary_ids and set(auxiliary_ids) != set(detail_ids):
+            raise InvalidResult('辅助双方队伍身份重复或不一致')
+    if None not in schedule_ids:
+        if any(identifier is not None and identifier not in schedule_ids for identifier in detail_ids):
+            raise InvalidResult('详情队伍身份不属于赛程双方')
+
+
 def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, names_by_source_id=None,
                      prior_team_name_provenance=None):
     if not isinstance(payload, dict):
@@ -242,6 +273,7 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
     if winner_error:
         raise InvalidResult(f'详情胜方身份冲突或格式无效：{winner_error}')
     schedule = schedule or {}
+    _check_schedule_binding(schedule, info, bo_identity['series_id'])
     date = schedule.get('scheduled_at')
     date_source = 'schedule' if date else 'unknown'
     if isinstance(date, str):

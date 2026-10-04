@@ -107,6 +107,11 @@ def test_nine_identity_projections_use_same_bo_and_winner_rules_in_normalization
         with pytest.raises(InvalidResult, match='胜方'):
             normalize_result(payload, 66845, schedule, allow_incomplete=True)
         return
+    if case[0] == 20233:
+        # 展示仍保留 unresolved 详情标签；明确相矛盾的赛程不能用于业务入库。
+        with pytest.raises(InvalidResult, match='身份'):
+            normalize_result(payload, 66845, schedule, allow_incomplete=True)
+        return
     match = normalize_result(payload, 66845, schedule, allow_incomplete=True)['matches'][0]
     assert match['series_id'] == case[1] and match['mvp'] is None
     assert match['team_name_provenance']['reason'] == BLOCKED_REASONS.get(case[0], 'same_series_and_team_ids')
