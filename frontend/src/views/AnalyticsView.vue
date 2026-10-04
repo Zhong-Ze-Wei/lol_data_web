@@ -19,7 +19,7 @@ const route = useRoute();
 const router = useRouter();
 const tab = computed(() => (route.query.tab === "teams" ? "teams" : "players"));
 const filters = reactive({
-  position: "a",
+  position: "c",
   min_matches: "5",
   date_from: "",
   date_to: "",
@@ -28,7 +28,7 @@ const filters = reactive({
 watch(
   () => route.query,
   () => {
-    filters.position = String(route.query.position || "a");
+    filters.position = String(route.query.position || "c");
     filters.min_matches = String(route.query.min_matches || "5");
     filters.date_from = String(route.query.date_from || "");
     filters.date_to = String(route.query.date_to || "");
@@ -38,7 +38,7 @@ watch(
 );
 const cohortKey = computed(() =>
   [
-    route.query.position || "a",
+    route.query.position || "c",
     route.query.min_matches || "5",
     route.query.date_from || "",
     route.query.date_to || "",
@@ -54,7 +54,7 @@ const players = useResource(
       ? request("/api/analytics/players", {
           params: {
             ...route.query,
-            position: route.query.position || "a",
+            position: route.query.position || "c",
             min_matches: route.query.min_matches || "5",
           },
           signal,
@@ -172,17 +172,17 @@ const teamChart = computed(() => {
 </script>
 <template>
   <header class="page-heading">
-    <h1>比较分析</h1>
-    <p>先统一位置、日期和样本门槛，再阅读表现差异。</p>
+    <h1>对比分析</h1>
+    <p>选择选手或战队，按相同位置、时间与样本口径比较。</p>
   </header>
   <div class="analysis-tabs" aria-label="分析类型">
     <button
       :class="{ selected: tab === 'players' }"
       @click="switchTab('players')"
     >
-      选手 · 五位置雷达</button
+      选手对比</button
     ><button :class="{ selected: tab === 'teams' }" @click="switchTab('teams')">
-      战队 · 战绩比较
+      战队对比
     </button>
   </div>
   <section class="panel">
@@ -240,7 +240,7 @@ const teamChart = computed(() => {
         <section class="panel">
           <header class="panel-header">
             <div>
-              <h2>赛场风格轮廓</h2>
+              <h2>同位置表现</h2>
             </div>
             <span class="tag"
               >{{ number(players.data.value.cohort_size) }} 位同位置选手</span

@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy import func, or_
 
 from app.models import Match, Player, Team
 from app.routes.common import date_bounds, filter_dates, match_data, page_args, pagination_data, player_data, team_data
@@ -21,6 +22,19 @@ def get_matches():
         name = request.args.get(key, '').strip()
         if name:
             query = query.filter(Match.red_team_name.ilike(f'%{name}%') | Match.blue_team_name.ilike(f'%{name}%'))
+    tournament = request.args.get('tournament_name', '').strip()
+    if tournament:
+        query = query.filter(func.lower(Match.tournament_name).contains(tournament.casefold(), autoescape=True))
+    keyword = request.args.get('query', '').strip()
+    if keyword:
+        predicates = [func.lower(column).contains(keyword.casefold(), autoescape=True) for column in (
+            Match.red_team_name, Match.blue_team_name, Match.tournament_name,
+        )]
+        if keyword.isascii() and keyword.isdecimal() and len(keyword) <= 19:
+            identifier = int(keyword)
+            if 0 < identifier <= 2**63 - 1:
+                predicates.append(Match.match_id == identifier)
+        query = query.filter(or_(*predicates))
     pagination = query.order_by(Match.date.desc(), Match.id.desc()).paginate(
         page=page, per_page=per_page, error_out=False,
     )

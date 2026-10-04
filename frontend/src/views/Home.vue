@@ -163,11 +163,14 @@ function rowLink(row) {
   <header class="page-heading home-heading">
     <div>
       <h1>赛事数据总览</h1>
-      <p>最近比赛、选手表现和战队战绩，在这里一起查看。</p>
+      <p>查看最近赛程，检索选手与战队的真实比赛记录。</p>
     </div>
-    <RouterLink class="button secondary small" to="/analytics"
-      ><Icon name="chart" />比较分析</RouterLink
-    >
+    <div class="home-actions">
+      <a class="text-link" href="#ai-query"><Icon name="ai" />AI 数据助手</a
+      ><RouterLink class="button secondary small" to="/analytics"
+        ><Icon name="chart" />比较分析</RouterLink
+      >
+    </div>
   </header>
   <ResourceState
     :loading="!overview && stats.loading.value"
@@ -190,73 +193,74 @@ function rowLink(row) {
       >
     </section></ResourceState
   >
-  <p v-if="overview?.updatedAt" class="muted small-text">
+  <p v-if="overview?.updatedAt" class="overview-updated muted small-text">
     总览统计更新 {{ timestamp(overview.updatedAt) }}（香港时间）
   </p>
-  <HistoryProgress @updated="updateOverview" />
   <div class="portal-grid">
-    <section class="panel recent-panel">
-      <header class="panel-header">
-        <h2><Icon name="match" />最近比赛</h2>
-        <RouterLink class="text-link" to="/match"
-          >全部比赛 <Icon name="arrow"
-        /></RouterLink>
-      </header>
-      <ResourceState
-        :loading="recent.loading.value"
-        :error="recent.error.value"
-        :empty="!recentMatches.length"
-        @retry="recent.reload"
-        ><div class="match-feed">
-          <article
-            v-for="match in recentMatches"
-            :key="match.match_id"
-            class="match-feed-row"
-          >
-            <div class="feed-date">
-              {{ date(match.date)
-              }}<small>{{ match.tournament_name || "历史比赛记录" }}</small>
-            </div>
-            <div class="feed-matchup">
-              <RouterLink
-                :to="detailLink('team', match.blue_team_name)"
-                :class="{
-                  winner: match.win_team_name === match.blue_team_name,
-                }"
-                >{{ match.blue_team_name
-                }}<span
-                  v-if="match.win_team_name === match.blue_team_name"
-                  class="win-label"
-                  >胜</span
-                ></RouterLink
-              ><span class="versus">VS</span
-              ><RouterLink
-                :to="detailLink('team', match.red_team_name)"
-                :class="{ winner: match.win_team_name === match.red_team_name }"
-                >{{ match.red_team_name
-                }}<span
-                  v-if="match.win_team_name === match.red_team_name"
-                  class="win-label"
-                  >胜</span
-                ></RouterLink
-              >
-            </div>
-            <div class="feed-meta">
-              <MatchStatus :verified="match.verified" /><span>{{
-                duration(match.game_time)
-              }}</span>
-            </div>
-            <RouterLink
-              class="detail-button"
-              :to="detailLink('match', match.match_id)"
-              >查看详情</RouterLink
+    <div class="portal-main">
+      <section class="panel recent-panel">
+        <header class="panel-header">
+          <h2><Icon name="match" />最近比赛</h2>
+          <RouterLink class="text-link" to="/match"
+            >全部比赛 <Icon name="arrow"
+          /></RouterLink>
+        </header>
+        <ResourceState
+          :loading="recent.loading.value"
+          :error="recent.error.value"
+          :empty="!recentMatches.length"
+          @retry="recent.reload"
+          ><div class="match-feed">
+            <article
+              v-for="match in recentMatches"
+              :key="match.match_id"
+              class="match-feed-row"
             >
-          </article>
-        </div></ResourceState
-      >
-    </section>
-    <div class="portal-sidebar">
-      <section class="panel ai-panel">
+              <div class="feed-date">
+                {{ date(match.date)
+                }}<small>{{ match.tournament_name || "历史比赛记录" }}</small>
+              </div>
+              <div class="feed-matchup">
+                <RouterLink
+                  :to="detailLink('team', match.blue_team_name)"
+                  :class="{
+                    winner: match.win_team_name === match.blue_team_name,
+                  }"
+                  >{{ match.blue_team_name
+                  }}<span
+                    v-if="match.win_team_name === match.blue_team_name"
+                    class="win-label"
+                    >胜</span
+                  ></RouterLink
+                ><span class="versus">VS</span
+                ><RouterLink
+                  :to="detailLink('team', match.red_team_name)"
+                  :class="{
+                    winner: match.win_team_name === match.red_team_name,
+                  }"
+                  >{{ match.red_team_name
+                  }}<span
+                    v-if="match.win_team_name === match.red_team_name"
+                    class="win-label"
+                    >胜</span
+                  ></RouterLink
+                >
+              </div>
+              <div class="feed-meta">
+                <MatchStatus :verified="match.verified" /><span>{{
+                  duration(match.game_time)
+                }}</span>
+              </div>
+              <RouterLink
+                class="detail-button"
+                :to="detailLink('match', match.match_id)"
+                >查看详情</RouterLink
+              >
+            </article>
+          </div></ResourceState
+        >
+      </section>
+      <section id="ai-query" class="panel ai-panel">
         <header class="panel-header">
           <h2><Icon name="ai" />AI 数据助手</h2>
           <span class="tag">{{
@@ -312,6 +316,8 @@ function rowLink(row) {
           >查看本次分析结果 <Icon name="arrow"
         /></a>
       </section>
+    </div>
+    <aside class="portal-sidebar" aria-label="数据排行与入口">
       <section class="panel ranking-panel">
         <header class="panel-header">
           <h2><Icon name="chart" />数据排行</h2>
@@ -367,7 +373,28 @@ function rowLink(row) {
             </li></ol
         ></ResourceState>
       </section>
-    </div>
+      <section class="panel quick-panel">
+        <header class="panel-header"><h2>数据入口</h2></header>
+        <div class="quick-links">
+          <RouterLink
+            v-for="[path, icon, title, text] in [
+              ['/player', 'player', '选手数据', '出场记录、英雄池、月度趋势'],
+              ['/team', 'team', '战队数据', '历史战绩、最近阵容'],
+              ['/hero', 'hero', '英雄数据', '出场样本、胜率与表现'],
+              ['/analytics', 'chart', '比较分析', '同位置雷达与战队比较'],
+            ]"
+            :key="path"
+            :to="path"
+            ><span class="quick-icon"><Icon :name="icon" /></span>
+            <div>
+              <strong>{{ title }}</strong
+              ><small>{{ text }}</small>
+            </div>
+            <Icon name="arrow"
+          /></RouterLink>
+        </div>
+      </section>
+    </aside>
   </div>
   <div
     v-if="result"
@@ -377,27 +404,7 @@ function rowLink(row) {
   >
     <AIResult :result="result" @choose="chooseQuestion" />
   </div>
-  <div class="home-lower-grid">
-    <section class="panel quick-panel">
-      <header class="panel-header"><h2>常用入口</h2></header>
-      <div class="quick-links">
-        <RouterLink
-          v-for="[path, icon, title, text] in [
-            ['/player', 'player', '选手数据', '出场记录、英雄池、月度趋势'],
-            ['/team', 'team', '战队数据', '历史战绩、最近阵容'],
-            ['/hero', 'hero', '英雄数据', '出场样本、胜率与表现'],
-            ['/analytics', 'chart', '比较分析', '同位置雷达与战队比较'],
-          ]"
-          :key="path"
-          :to="path"
-          ><span class="quick-icon"><Icon :name="icon" /></span>
-          <div>
-            <strong>{{ title }}</strong
-            ><small>{{ text }}</small>
-          </div>
-          <Icon name="arrow"
-        /></RouterLink>
-      </div>
-    </section>
+  <div class="home-coverage">
+    <HistoryProgress @updated="updateOverview" />
   </div>
 </template>

@@ -58,37 +58,6 @@ const range = computed(() => evidenceRange(evidence.value));
         </button>
       </div>
     </div>
-    <div v-if="evidence" class="ai-evidence">
-      <div class="ai-scope">
-        <strong>时间筛选</strong><span>{{ range.requested }}</span
-        ><span v-if="evidence.grain" class="tag">{{ evidence.grain }}</span>
-      </div>
-      <p class="ai-sample-range">确认赛程样本：{{ range.samples }}</p>
-      <dl v-if="samples.length" class="ai-sample-grid">
-        <div v-for="sample in samples" :key="sample.key">
-          <dt>{{ sample.label }}</dt>
-          <dd>
-            {{ sample.value }}<small>{{ sample.unit }}</small>
-          </dd>
-        </div>
-      </dl>
-      <p
-        v-if="
-          evidence.scheduled_matches != null ||
-          evidence.updated_date_matches != null ||
-          evidence.unknown_date_matches != null
-        "
-        class="ai-date-quality"
-      >
-        日期口径：<span v-if="evidence.scheduled_matches != null"
-          >开赛日期 {{ number(evidence.scheduled_matches) }} 场</span
-        ><span v-if="evidence.updated_date_matches != null"
-          >源更新时间 {{ number(evidence.updated_date_matches) }} 场</span
-        ><span v-if="evidence.unknown_date_matches != null"
-          >日期未记录 {{ number(evidence.unknown_date_matches) }} 场</span
-        >
-      </p>
-    </div>
     <div v-if="result.data?.length" class="ai-data-section">
       <div class="ai-subheading">
         <h3>查询数据</h3>
@@ -132,6 +101,38 @@ const range = computed(() => evidenceRange(evidence.value));
         >
       </p>
     </div>
+    <details v-if="evidence" class="ai-evidence">
+      <summary>收录范围与有效样本</summary>
+      <div class="ai-scope">
+        <strong>时间筛选</strong><span>{{ range.requested }}</span
+        ><span v-if="evidence.grain" class="tag">{{ evidence.grain }}</span>
+      </div>
+      <p class="ai-sample-range">确认赛程样本：{{ range.samples }}</p>
+      <dl v-if="samples.length" class="ai-sample-grid">
+        <div v-for="sample in samples" :key="sample.key">
+          <dt>{{ sample.label }}</dt>
+          <dd>
+            {{ sample.value }}<small>{{ sample.unit }}</small>
+          </dd>
+        </div>
+      </dl>
+      <p
+        v-if="
+          evidence.scheduled_matches != null ||
+          evidence.updated_date_matches != null ||
+          evidence.unknown_date_matches != null
+        "
+        class="ai-date-quality"
+      >
+        日期口径：<span v-if="evidence.scheduled_matches != null"
+          >开赛日期 {{ number(evidence.scheduled_matches) }} 场</span
+        ><span v-if="evidence.updated_date_matches != null"
+          >源更新时间 {{ number(evidence.updated_date_matches) }} 场</span
+        ><span v-if="evidence.unknown_date_matches != null"
+          >日期未记录 {{ number(evidence.unknown_date_matches) }} 场</span
+        >
+      </p>
+    </details>
     <details v-if="result.assumptions?.length" class="ai-assumptions">
       <summary>统计口径 · {{ result.assumptions.length }} 项</summary>
       <ul>
