@@ -128,7 +128,10 @@ def test_parent_cannot_reassign_series_from_another_tournament(db, result, tmp_p
     assert db.session.get(HistorySeries, 20674).tournament_id == 777
     parent = db.session.query(HistoryStage).filter_by(tournament_id=333, cache_key='p_765').one()
     assert parent.status == 'failed' and '两个赛事' in parent.last_error
-    assert db.session.query(HistorySeries).count() == 1
+    assert db.session.query(HistorySeries).count() == 2
+    independent = db.session.get(HistorySeries, 20675)
+    assert independent.tournament_id == 333 and independent.stage_id == parent.id
+    assert independent.status == 'pending'
     assert report['details']['coverage']['failed_tasks'] == 3
 
 

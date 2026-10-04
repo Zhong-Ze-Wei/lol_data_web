@@ -177,17 +177,18 @@ def _archive_stage_payload(stage, raw_dir, rows, *, failed=False):
     if failed:
         failed_path = directory / 'failed-attempts' / f'{stage.cache_key}-{uuid4().hex}.json'
         raw = _archive(failed_path, rows)
-        if not stage.raw_file:
+        if not stage.raw_file and not ordinary.exists():
             # 首轮失败的常规原件入口沿用旧行为，此时没有成功来源绑定。
             _archive(ordinary, rows)
         return raw
-    if not stage.raw_file:
+    if not stage.raw_file and not ordinary.exists():
         return _archive(ordinary, rows)
     encoded = json.dumps(rows, ensure_ascii=False, indent=2, default=str).encode('utf-8')
     digest = hashlib.sha256(encoded).hexdigest()
-    previous = Path(stage.raw_file)
-    if stage.raw_sha256 == digest and previous.is_file() and hashlib.sha256(previous.read_bytes()).hexdigest() == digest:
-        return stage.raw_file, digest
+    previous = Path(stage.raw_file) if stage.raw_file else ordinary
+    if ((stage.raw_sha256 == digest or not stage.raw_file) and previous.is_file()
+            and hashlib.sha256(previous.read_bytes()).hexdigest() == digest):
+        return str(previous), digest
     versioned = directory / f'{stage.cache_key}-{digest}.json'
     if versioned.is_file() and hashlib.sha256(versioned.read_bytes()).hexdigest() == digest:
         return str(versioned), digest
@@ -231,7 +232,7 @@ def _discover_stage(client, stage, raw_dir, now):
             return
         raise
     tour = db.session.get(HistoryTournament, stage.tournament_id)
-    # 先完成全阶段校验，再提交；一个错误不能让半个阶段被标成发现完成。
+    # 结构、日期、重复 BO、比分先全阶段校验；此类错误仍不能提交合法前缀。
     seen = set()
     try:
         if not isinstance(rows, list):
@@ -242,19 +243,25 @@ def _discover_stage(client, stage, raw_dir, now):
             if sid in seen:
                 raise SourceError(f'stage {stage.cache_key}: 重复 series_id={sid}')
             seen.add(sid)
-            series = db.session.get(HistorySeries, sid)
-            if series is not None and series.tournament_id != tour.tournament_id:
-                raise SourceError(f'series {sid}: 同一系列出现在两个赛事，保留冲突以人工核对')
             for field in ('team_a_win', 'team_b_win'):
                 if row.get(field) not in (None, ''):
                     int(row[field])
     except (SourceError, TypeError, ValueError):
         _archive_stage_payload(stage, raw_dir, rows, failed=True)
         raise
-    raw = _archive_stage_payload(stage, raw_dir, rows)
-    _bind_legacy_stage_archives(stage)
-    stage.raw_file, stage.raw_sha256 = raw
+    conflicts = []
+    independent = []
     for row, schedule in schedules:
+        series = db.session.get(HistorySeries, schedule['series_id'])
+        if series is not None and series.tournament_id != tour.tournament_id:
+            conflicts.append(series.series_id)
+        else:
+            independent.append((row, schedule))
+    raw = _archive_stage_payload(stage, raw_dir, rows, failed=bool(conflicts))
+    if not conflicts:
+        _bind_legacy_stage_archives(stage)
+        stage.raw_file, stage.raw_sha256 = raw
+    for row, schedule in independent:
         sid = schedule['series_id']
         series = db.session.get(HistorySeries, sid)
         if series is None:
@@ -278,6 +285,15 @@ def _discover_stage(client, stage, raw_dir, now):
             # 赛程被更正时无需重下载所有原始战报，但需要幂等回填业务日期/赛事信息。
             _queue_series_results(series, raw_dir)
     stage.series_count = len(seen)
+    if conflicts:
+        error = (f'series {sorted(conflicts)}: 同一系列出现在两个赛事，隔离冲突以人工核对；'
+                 f'已持久化独立系列 {len(independent)}/{len(schedules)}')
+        # 与合法系列同一事务提交失败和退避；返回报告，不让 caller 再 rollback 或重复计失败。
+        _finish(stage, 'failed', error)
+        return {'status': 'failed', 'error': error, 'tournament_id': stage.tournament_id,
+                'conflicting_series_ids': sorted(conflicts), 'persisted_series_count': len(independent),
+                'source_series_count': len(schedules), 'source_url': f'https://img.scoregg.com/tr_round/{stage.cache_key}.json',
+                'source_archive': {'raw_file': raw[0], 'sha256': raw[1]}}
     _finish(stage, 'discovered', raw=raw)
 
 
@@ -825,7 +841,9 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                     elif kind == 'series':
                         _discover_resultlist(client, entity, raw_dir, now)
                     elif kind == 'stage':
-                        _discover_stage(client, entity, raw_dir, now)
+                        outcome = _discover_stage(client, entity, raw_dir, now)
+                        if outcome is not None:
+                            outcomes.append({**current, **outcome})
                     else:
                         _discover_tournament(client, entity, raw_dir, now)
                 except (SourceError, OSError, ValueError) as exc:
@@ -867,7 +885,9 @@ def run_history(client, run, raw_dir, reports_dir, *, phase='all', now=None, max
                 client.budget.check()
                 current = {'entity': 'stage', 'id': stage.cache_key, 'tournament_id': stage.tournament_id}
                 try:
-                    _discover_stage(client, stage, raw_dir, now)
+                    outcome = _discover_stage(client, stage, raw_dir, now)
+                    if outcome is not None:
+                        outcomes.append({**current, **outcome})
                 except (SourceError, OSError, ValueError) as exc:
                     if isinstance(exc, BudgetExceeded):
                         raise

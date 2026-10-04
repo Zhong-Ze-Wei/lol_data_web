@@ -124,7 +124,7 @@ def test_stage_binding_changes_only_with_real_source_row_and_is_available_before
     assert db.session.query(SyncTask).one().status == 'queued'
 
 
-def test_whole_stage_conflict_keeps_raw_but_does_not_bind_or_mutate_series(db, tmp_path):
+def test_foreign_series_conflict_keeps_raw_and_commits_only_independent_series(db, tmp_path):
     series, _, _, stage = _prepared_result(db, tmp_path)
     other = HistoryTournament(tournament_id=2000, name='另一赛事')
     db.session.add(other)
@@ -137,11 +137,15 @@ def test_whole_stage_conflict_keeps_raw_but_does_not_bind_or_mutate_series(db, t
     db.session.add(new_stage)
     db.session.commit()
     rows = [{**_schedule_row(), 'matchID': '999'}, {**_schedule_row(), 'matchID': '888'}]
-    with pytest.raises(SourceError, match='两个赛事'):
-        history._discover_stage(ScheduleSource(rows), new_stage, tmp_path / 'raw', datetime(2026, 10, 4))
+    outcome = history._discover_stage(ScheduleSource(rows), new_stage, tmp_path / 'raw', datetime(2026, 10, 4))
     db.session.rollback()
-    assert db.session.get(HistorySeries, 999) is None and series.stage_id == stage.id
+    independent = db.session.get(HistorySeries, 999)
+    assert independent is not None and independent.tournament_id == 1007 and independent.stage_id == new_stage.id
+    assert series.stage_id == stage.id and db.session.get(HistorySeries, 888).tournament_id == 2000
+    assert new_stage.status == 'failed' and new_stage.failure_count == 1 and '两个赛事' in new_stage.last_error
+    assert outcome['conflicting_series_ids'] == [888] and outcome['persisted_series_count'] == 1
     assert new_stage.raw_file is None
+    assert independent.schedule()['source_archive'] == outcome['source_archive']
     assert json.loads((tmp_path / 'raw' / 'history' / 'stages' / '1007' / '3.json').read_bytes()) == rows
 
 
