@@ -1,0 +1,18 @@
+{
+  "code": "200",
+  "data": {
+    "matchID": "27625",
+    "tournamentID": "430",
+    "gameID": "1",
+    "teamID_a": "2090",
+    "teamID_b": "2091",
+    "start_time": "1670745600",
+    "status": "2",
+    "team_a_win": "1",
+    "team_b_win": "1",
+    "game_count": "2",
+    "result_count": "2",
+    "more_team_list": [],
+    "result_list": []
+  }
+}

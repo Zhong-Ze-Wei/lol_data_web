@@ -1,11 +1,14 @@
 """ScoreGG 的有限预算 HTTP 客户端与 LOL 赛程发现。"""
 
+import hashlib
 import json
 import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
+from uuid import uuid4
 
 import requests
 
@@ -19,9 +22,10 @@ class BudgetExceeded(SourceError):
 
 
 class SourceHTTPError(SourceError):
-    def __init__(self, url, status_code):
+    def __init__(self, url, status_code, response=None):
         self.url = url
         self.status_code = status_code
+        self.response = response
         super().__init__(f'{url}: HTTP {status_code}')
 
 
@@ -80,6 +84,9 @@ class ScoreGGClient:
         return min(30, self.backoff * 2 ** attempt)
 
     def get(self, url):
+        return self._request('GET', url)
+
+    def _request(self, method, url, *, data=None, on_response=None):
         for attempt in range(self.retries + 1):
             if self.last_request_at is not None and self.min_interval:
                 delay = self.min_interval - (self.budget.clock() - self.last_request_at)
@@ -91,10 +98,15 @@ class ScoreGGClient:
             response = None
             try:
                 remaining = self.budget.remaining_seconds()
-                response = self.session.get(
-                    url, timeout=(min(self.timeout[0], remaining), min(self.timeout[1], remaining)),
-                )
-                if response.status_code == 429 or response.status_code >= 500:
+                timeout = (min(self.timeout[0], remaining), min(self.timeout[1], remaining))
+                if method == 'GET':
+                    response = self.session.get(url, timeout=timeout)
+                else:
+                    response = self.session.post(url, data=data, timeout=timeout, allow_redirects=False)
+                if on_response is not None:
+                    on_response(response)
+                if (response.status_code == 429 or response.status_code >= 500
+                        or method == 'POST' and 300 <= response.status_code < 400):
                     raise requests.HTTPError(f'HTTP {response.status_code}', response=response)
                 response.raise_for_status()
                 return response
@@ -102,7 +114,7 @@ class ScoreGGClient:
                 retryable = response is None or response.status_code == 429 or response.status_code >= 500
                 if not retryable or attempt == self.retries:
                     if response is not None:
-                        raise SourceHTTPError(url, response.status_code) from exc
+                        raise SourceHTTPError(url, response.status_code, response) from exc
                     raise SourceError(f'{url}: {type(exc).__name__}: {exc}') from exc
                 delay = self._retry_delay(response, attempt)
                 self.budget.check(wait=delay)
@@ -124,6 +136,187 @@ class ScoreGGClient:
 
     def get_result_list(self, series_id):
         return self.get_json(f'https://img.scoregg.com/match/resultlist/{int(series_id)}.json')
+
+    def get_match_metadata(self, series_id, *, on_response=None):
+        """官网 BO 页声明的匿名元数据 POST；仍共享请求数、限速和重试预算。"""
+        return self._request('POST', 'https://ho.scoregg.com/services/api_url.php', data={
+            'api_path': '/services/match/match_info_new.php', 'method': 'post',
+            'platform': 'web', 'api_version': '9.9.9', 'language_id': '1', 'matchID': int(series_id),
+        }, on_response=on_response)
+
+
+def _source_integer(value, field, *, minimum=0):
+    text = str(value).strip()
+    if not text.isascii() or not text.isdigit() or int(text) < minimum:
+        raise SourceError(f'官网 metadata {field} 不是合法整数')
+    return int(text)
+
+
+def _fallback_schedule(schedule):
+    """只有已归档、明确结束的双方赛程才允许向官方元数据补问单局 ID。"""
+    row = schedule.get('source_row')
+    archive = schedule.get('source_archive')
+    if (not isinstance(row, dict) or not archive or str(schedule.get('status')) != '2'
+            or str(row.get('status')) != '2' or str(row.get('is_publist')) != '1'):
+        return None
+    required = ('matchID', 'teamID_a', 'teamID_b', 'start_time')
+    if any(row.get(key) in (None, '') for key in required) or schedule.get('tournament_id') is None:
+        return None
+    if row.get('more_team_list') or row.get('gameID') not in (None, '', 1, '1'):
+        raise SourceError('CDN HTTP404 后的持久赛程不是可核验双方 LOL，未请求 metadata')
+    identity = {key: _source_integer(row[key], key, minimum=1) for key in required}
+    identity['tournamentID'] = _source_integer(schedule['tournament_id'], 'tournamentID', minimum=1)
+    if row.get('game_count') not in (None, ''):
+        identity['game_count'] = _source_integer(row['game_count'], 'schedule.game_count')
+    if identity['matchID'] != schedule['series_id'] or identity['teamID_a'] == identity['teamID_b']:
+        raise SourceError('CDN HTTP404 后的持久赛程 BO/双方身份矛盾，未请求 metadata')
+    if schedule.get('scheduled_at') is None or _schedule_date(row) != schedule['scheduled_at']:
+        raise SourceError('CDN HTTP404 后的持久赛程日期不一致，未请求 metadata')
+    encoded = Path(archive['raw_file']).read_bytes()
+    rows = json.loads(encoded)
+    if (hashlib.sha256(encoded).hexdigest() != archive['sha256'] or not isinstance(rows, list)
+            or sum(item == row for item in rows) != 1):
+        raise SourceError('CDN HTTP404 后的赛程原件 SHA/唯一原行不成立，未请求 metadata')
+    return identity
+
+
+def metadata_result_list(payload, schedule):
+    """校验真实 metadata，返回可用清单；不把基本指标伪装成完整战报。"""
+    identity = _fallback_schedule(schedule)
+    if identity is None:
+        raise SourceError('官网 metadata 清单缺少可核验的结束赛程来源')
+    if not isinstance(payload, dict) or payload.get('code') not in (200, '200'):
+        raise SourceError('官网 metadata 返回失败状态')
+    data = payload.get('data')
+    if not isinstance(data, dict) or str(data.get('gameID')) != '1':
+        raise SourceError('官网 metadata 未确认 LOL')
+    for field in ('matchID', 'tournamentID', 'start_time'):
+        if _source_integer(data.get(field), field, minimum=1) != identity[field]:
+            raise SourceError(f'官网 metadata {field} 与赛程来源不一致')
+    teams = {_source_integer(data.get(f'teamID_{side}'), f'teamID_{side}', minimum=1) for side in ('a', 'b')}
+    if teams != {identity['teamID_a'], identity['teamID_b']}:
+        raise SourceError('官网 metadata 双方 ID 与赛程来源不一致')
+    if str(data.get('status')) != '2' or data.get('more_team_list'):
+        raise SourceError('官网 metadata 未确认双方系列已结束')
+    for side in ('a', 'b'):
+        tid = _source_integer(data[f'teamID_{side}'], f'teamID_{side}', minimum=1)
+        old_side = 'a' if tid == identity['teamID_a'] else 'b'
+        old_score = schedule['source_row'].get(f'team_{old_side}_win')
+        if old_score not in (None, '') and _source_integer(data.get(f'team_{side}_win'), f'team_{side}_win') != _source_integer(old_score, 'schedule_score'):
+            raise SourceError('官网 metadata 最终比分与赛程来源不一致')
+    if data.get('win_teamID') not in (None, '', 0, '0'):
+        winner = _source_integer(data['win_teamID'], 'win_teamID', minimum=1)
+        scores = {_source_integer(data[f'teamID_{side}'], f'teamID_{side}', minimum=1):
+                  _source_integer(data.get(f'team_{side}_win'), f'team_{side}_win') for side in ('a', 'b')}
+        if winner not in teams or (len(set(scores.values())) == 2 and scores[winner] != max(scores.values())):
+            raise SourceError('官网 metadata 系列胜方与双方/最终比分不一致')
+    rows = data.get('result_list')
+    if not isinstance(rows, list):
+        raise SourceError('官网 metadata result_list 必须为列表')
+    count = _source_integer(data.get('result_count'), 'result_count')
+    games = _source_integer(data.get('game_count'), 'game_count')
+    if identity.get('game_count', 0) > 0 and games != identity['game_count']:
+        raise SourceError('官网 metadata BO 格式局数与赛程来源不一致')
+    if count != len(rows) or count > games:
+        raise SourceError('官网 metadata result_count/game_count 与清单数量不一致')
+    seen = set()
+    wins = {tid: 0 for tid in teams}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise SourceError('官网 metadata 清单含非法单局结构')
+        rid = _source_integer(row.get('resultID'), 'resultID', minimum=1)
+        if rid in seen:
+            raise SourceError('官网 metadata 清单含重复 resultID')
+        seen.add(rid)
+        if row.get('matchID') is not None and _source_integer(row['matchID'], 'result.matchID', minimum=1) != identity['matchID']:
+            raise SourceError('官网 metadata 单局 BO 与系列身份不一致')
+        row_teams = {_source_integer(row.get(f'teamID_{side}'), f'result.teamID_{side}', minimum=1) for side in ('a', 'b')}
+        if row_teams != teams:
+            raise SourceError('官网 metadata 单局双方与系列身份不一致')
+        outcomes = {field: _source_integer(row.get(field), field, minimum=1) for field in ('win_teamID', 'los_teamID')}
+        for identifier in outcomes.values():
+            if identifier not in teams:
+                raise SourceError('官网 metadata 单局胜负方不属于双方')
+        if outcomes['win_teamID'] == outcomes['los_teamID']:
+            raise SourceError('官网 metadata 单局胜负方相同')
+        wins[outcomes['win_teamID']] += 1
+        if row.get('url') not in (None, '', 'result'):
+            raise SourceError('官网 metadata 单局声明不同详情入口，当前采集器不猜路径')
+    expected = sum(_source_integer(data.get(f'team_{side}_win'), f'team_{side}_win') for side in ('a', 'b'))
+    if expected > games:
+        raise SourceError('官网 metadata 最终比分超过 BO 最大局数')
+    for side in ('a', 'b'):
+        if wins[_source_integer(data[f'teamID_{side}'], f'teamID_{side}', minimum=1)] > _source_integer(data[f'team_{side}_win'], f'team_{side}_win'):
+            raise SourceError('官网 metadata 单局胜局超过明确最终比分')
+    return {'code': 200, 'data': rows}, bool(rows) and count == expected
+
+
+def _new_response_archive(path, response):
+    if response is None:
+        return None
+    encoded = response.content
+    with path.open('xb') as file:
+        file.write(encoded)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != hashlib.sha256(encoded).hexdigest():
+        raise OSError('来源响应归档后 SHA 不一致')
+    return {'raw_file': str(path), 'sha256': digest, 'bytes': len(encoded),
+            'basis': 'requests_response_content_application_body'}
+
+
+def metadata_result_list_after_404(client, schedule, raw_dir, original_error):
+    """只在真实 CDN404 后补问一次来源；两种来源及每次响应分别不可覆盖归档。"""
+    expected_url = f"https://img.scoregg.com/match/resultlist/{schedule['series_id']}.json"
+    if (original_error.status_code != 404 or original_error.url != expected_url
+            or _fallback_schedule(schedule) is None):
+        raise original_error
+    directory = Path(raw_dir) / 'history' / 'resultlist-fallback' / str(schedule['series_id']) / uuid4().hex
+    directory.mkdir(parents=True, exist_ok=False)
+    evidence = {'source': 'scoregg_match_metadata', 'series_id': schedule['series_id'],
+                'observed_at_utc': datetime.now(timezone.utc).isoformat(), 'status': 'planned',
+                'cdn': {'url': original_error.url, 'http_status': 404,
+                        'response': _new_response_archive(directory / 'cdn-404.body', original_error.response)},
+                'metadata': {'url': 'https://ho.scoregg.com/services/api_url.php', 'method': 'POST',
+                             'api_path': '/services/match/match_info_new.php', 'responses': []},
+                'schedule_archive': schedule['source_archive'],
+                'schedule_row_sha256': hashlib.sha256(json.dumps(schedule['source_row'], ensure_ascii=False,
+                                                                 sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()}
+
+    def persist():
+        path = directory / f'evidence-{uuid4().hex}.json'
+        with path.open('x', encoding='utf-8') as file:
+            json.dump(evidence, file, ensure_ascii=False, indent=2)
+        return str(path)
+
+    persist()
+
+    def received(response):
+        number = len(evidence['metadata']['responses']) + 1
+        archive = _new_response_archive(directory / f'metadata-{number:02d}.body', response)
+        evidence['metadata']['responses'].append({'http_status': response.status_code, 'response': archive})
+        persist()
+
+    try:
+        response = client.get_match_metadata(schedule['series_id'], on_response=received)
+        try:
+            payload = response.json()
+        except (ValueError, requests.exceptions.JSONDecodeError) as exc:
+            raise SourceError('官网 metadata 未返回有效 JSON') from exc
+        resultlist, complete = metadata_result_list(payload, schedule)
+        evidence['status'] = 'validated'
+        evidence['result_ids'] = result_ids_from_list(resultlist, schedule['series_id'])
+        evidence['list_complete'] = complete
+        evidence['raw_file'] = evidence['metadata']['responses'][-1]['response']['raw_file']
+        evidence['sha256'] = evidence['metadata']['responses'][-1]['response']['sha256']
+        evidence['evidence_file'] = persist()
+        return resultlist, evidence
+    except (SourceError, OSError, ValueError) as exc:
+        evidence['status'] = 'budget_exhausted' if isinstance(exc, BudgetExceeded) else 'failed'
+        evidence['error'] = str(exc)
+        evidence_file = persist()
+        if isinstance(exc, BudgetExceeded):
+            raise
+        raise SourceError(f'CDN HTTP404 后官网 metadata 失败: {exc}；依据 {evidence_file}') from exc
 
 
 def result_ids_from_list(payload, series_id):
