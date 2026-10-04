@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import math
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import subprocess
@@ -46,13 +47,15 @@ def wait_until(instant):
         time.sleep(min(60, remaining))
 
 
-def run_worker(max_requests, max_seconds, max_batches=None):
+def run_worker(max_requests, max_seconds, max_batches=None, min_interval=0.2):
+    if not math.isfinite(min_interval) or min_interval < 0:
+        raise ValueError("请求间隔必须为有限非负秒数")
     state_file = ROOT / "data" / "history-worker.json"
     with WorkerRuntime(state_file, atomic_json) as runtime:
-        return _run_batches(runtime, max_requests, max_seconds, max_batches)
+        return _run_batches(runtime, max_requests, max_seconds, max_batches, min_interval)
 
 
-def _run_batches(runtime, max_requests, max_seconds, max_batches):
+def _run_batches(runtime, max_requests, max_seconds, max_batches, min_interval=0.2):
     batches = 0
     attempts = 0
     while max_batches is None or attempts < max_batches:
@@ -64,7 +67,7 @@ def _run_batches(runtime, max_requests, max_seconds, max_batches):
             wait_until(resume)
         command = [sys.executable, "-X", "utf8", "-m", "scripts.pipeline", "history",
                    "--phase", "all", "--max-requests", str(max_requests),
-                   "--max-seconds", str(max_seconds), "--min-interval", "1"]
+                   "--max-seconds", str(max_seconds), "--min-interval", str(min_interval)]
         runtime.update(status="running", current_batch=batches + 1, resume_at=None)
         try:
             result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
@@ -120,11 +123,15 @@ def main():
     parser.add_argument("--max-requests", type=int, default=400)
     parser.add_argument("--max-seconds", type=int, default=900)
     parser.add_argument("--max-batches", type=int)
+    parser.add_argument("--min-interval", type=float, default=0.2,
+                        help="每批同一进程HTTP尝试的最小间隔（秒），默认0.2")
     args = parser.parse_args()
     if args.max_requests < 1 or not 1 <= args.max_seconds <= 900:
         parser.error("请求数必须为正数，单批时间必须为1–900秒")
     if args.max_batches is not None and args.max_batches < 1:
         parser.error("批次数必须为正数")
+    if not math.isfinite(args.min_interval) or args.min_interval < 0:
+        parser.error("请求间隔必须为有限非负秒数")
     (ROOT / "logs").mkdir(exist_ok=True)
     handler = RotatingFileHandler(ROOT / "logs" / "history-worker.log", maxBytes=5_000_000,
                                   backupCount=3, encoding="utf-8")
@@ -132,7 +139,7 @@ def main():
                         handlers=[handler])
     try:
         with PipelineLock(ROOT / "data" / ".history-worker.lock"):
-            return run_worker(args.max_requests, args.max_seconds, args.max_batches)
+            return run_worker(args.max_requests, args.max_seconds, args.max_batches, args.min_interval)
     except AlreadyRunning:
         logging.info("已有历史补采执行器，本次未重复启动。")
         return 0
