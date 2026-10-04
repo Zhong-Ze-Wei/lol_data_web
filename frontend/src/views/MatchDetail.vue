@@ -25,12 +25,23 @@ const resource = useResource(
 );
 const match = computed(() => resource.data.value?.match);
 const players = computed(() => resource.data.value?.players || []);
+const sideLabels = computed(() =>
+  match.value?.side_basis === "metadata_team_a_b"
+    ? { blue: "队伍 A", red: "队伍 B" }
+    : { blue: "蓝方", red: "红方" },
+);
 const hasDamage = computed(() =>
   players.value.some((player) => player.atk != null),
 );
 const qualityNotice = computed(() => {
   if (!match.value) return "";
   const notes = [];
+  if (match.value.side_basis === "metadata_team_a_b") {
+    notes.push("红蓝方尚未确认，双方按来源顺序展示");
+  }
+  if (players.value.some((player) => player.position == null)) {
+    notes.push("部分选手位置待确认");
+  }
   if (players.value.length < 10) {
     notes.push(
       match.value.verified
@@ -57,13 +68,13 @@ const sides = computed(() =>
   resource.data.value
     ? [
         {
-          name: "蓝方",
+          name: sideLabels.value.blue,
           color: "blue",
           team: resource.data.value.blue_team,
           teamName: match.value.blue_team_name,
         },
         {
-          name: "红方",
+          name: sideLabels.value.red,
           color: "red",
           team: resource.data.value.red_team,
           teamName: match.value.red_team_name,
@@ -140,7 +151,7 @@ const damage = computed(() => {
       </p>
       <section class="match-scoreboard">
         <div class="score-team blue">
-          <span class="eyebrow">蓝方</span
+          <span class="eyebrow">{{ sideLabels.blue }}</span
           ><RouterLink :to="detailLink('team', match.blue_team_name)">{{
             match.blue_team_name
           }}</RouterLink
@@ -158,7 +169,7 @@ const damage = computed(() => {
           ><small v-if="match.mvp">MVP / {{ match.mvp }}</small>
         </div>
         <div class="score-team red">
-          <span class="eyebrow">红方</span
+          <span class="eyebrow">{{ sideLabels.red }}</span
           ><RouterLink :to="detailLink('team', match.red_team_name)">{{
             match.red_team_name
           }}</RouterLink

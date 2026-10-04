@@ -351,6 +351,7 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
             team[f'player_{pos}_id'] = name
             player = {
                 'match_id': result_id, 'date': date, 'name': name, 'pic': info.get(prefix + 'pic'),
+                'source_player_id': source_player_id(info.get(prefix + 'playerID')),
                 'hero': info.get(f'{side}_hero_{pos}_name'),
                 'hero_lv': numeric(info.get(f'{side}_hero_{pos}_lv'), 'hero_lv', integer=True),
                 'team_name': names[side], 'position': pos, 'game_time': duration,
@@ -377,6 +378,9 @@ def normalize_result(payload, result_id, schedule=None, allow_incomplete=False, 
             players.append(player)
         teams.append(team)
     invalid_metric_groups = _clear_missing_metric_groups(info, teams, players)
+    identifiers = [player['source_player_id'] for player in players if player['source_player_id'] is not None]
+    if len(set(identifiers)) != len(identifiers) or any(len(identifier) > 100 for identifier in identifiers):
+        raise InvalidResult('详情来源选手 ID 重复或超过字段长度')
     missing.extend(group['reason'] for group in invalid_metric_groups)
     normalized = {'matches': [match], 'teams': teams, 'players': players}
     if missing:
@@ -480,7 +484,7 @@ def _rekey_verified_team_names(existing, data):
     """同局身份已确认的更名原位更新；不同昵称不继承旧槽的可选指标。"""
     match = data['matches'][0]
     proof = match['team_name_provenance']
-    if (existing is None or not existing.verified or existing.source != 'scoregg'
+    if (existing is None or not existing.verified or existing.source not in ('scoregg', 'scoregg_metadata')
             or existing.series_id != match['series_id'] or proof['selected_source'] != 'schedule'):
         return
     old_names = {'red': existing.red_team_name, 'blue': existing.blue_team_name}
@@ -532,6 +536,103 @@ def _discard_changed_player_slots(data):
     db.session.flush()
 
 
+def _upsert_identified_players(rows, preserve_nulls):
+    """有来源 ID 的出场原位升级；先腾出角色键，避免换位时瞬间唯一键冲突。"""
+    result_id = rows[0]['match_id']
+    existing = db.session.query(Player).filter_by(match_id=result_id).all()
+    by_id = {player.source_player_id: player for player in existing if player.source_player_id is not None}
+    by_slot = {(player.team_name, player.position): player for player in existing if player.position is not None}
+    updates, used = [], set()
+    for row in rows:
+        identifier = row.get('source_player_id')
+        player = by_id.get(identifier) if identifier is not None else None
+        if player is None and row['position'] is not None:
+            slot = by_slot.get((row['team_name'], row['position']))
+            if slot is not None and slot.source_player_id is not None and identifier is None:
+                raise InvalidResult('完整刷新缺少已知出场的来源选手 ID，不能清除身份或重建主键')
+            if slot is not None and slot.name == row['name'] and slot.source_player_id in (None, identifier):
+                player = slot
+        if player is not None and player.id in used:
+            raise InvalidResult('两个来源选手不能升级同一出场行')
+        if player is not None:
+            used.add(player.id)
+        updates.append((player, row))
+    slots = {(row['team_name'], row['position']) for row in rows if row['position'] is not None}
+    for player in existing:
+        if player.id in used:
+            player.position = f'__source_upgrade_{uuid4().hex}'
+        elif (player.team_name, player.position) in slots:
+            db.session.delete(player)
+    db.session.flush()
+    for player, row in updates:
+        keep_optional = preserve_nulls and player is not None and player.name == row['name']
+        if player is None:
+            player = Player()
+            db.session.add(player)
+        for field, value in row.items():
+            if value is not None or not keep_optional or field in ('position', 'source_player_id'):
+                setattr(player, field, value)
+    db.session.flush()
+
+
+def ingest_metadata_result(payload, result_id, schedule, archive, run_id=None):
+    """独立真实基础来源只补缺项；已核验完整 CDN 详情拥有更高优先级。"""
+    from app.services.metadata_snapshot import normalize_metadata_snapshot
+    from app.services.spider import SourceError
+
+    try:
+        data = normalize_metadata_snapshot(payload, result_id, schedule, archive)
+        existing = db.session.query(Match).filter_by(match_id=result_id).first()
+        if existing is not None and existing.verified and existing.source == 'scoregg':
+            return IngestOutcome(result_id, 'skipped', '已核验 CDN 详情保留；metadata 不降级完整来源')
+        if existing is not None and existing.verified and existing.source == 'scoregg_metadata':
+            _check_metadata_roster_refresh(existing, data)
+            _rekey_verified_team_names(existing, data)
+        else:
+            # 旧 CSV 未核验身份不附着新来源 ID，不继承其猜测角色或指标。
+            db.session.query(Player).filter_by(match_id=result_id).delete(synchronize_session=False)
+            db.session.query(Team).filter_by(match_id=result_id).delete(synchronize_session=False)
+        bulk_upsert(Match, data['matches'], ['match_id'], preserve_nulls=False)
+        for model, rows in ((Team, data['teams']), (Player, data['players'])):
+            nullable = [column.name for column in model.__table__.columns if column.nullable and not column.primary_key]
+            for row in rows:
+                for field in nullable:
+                    row.setdefault(field, None)
+        bulk_upsert(Team, data['teams'], ['match_id', 'team_name'], preserve_nulls=False)
+        _upsert_identified_players(data['players'], preserve_nulls=False)
+        error = ', '.join(data['source_incomplete'])
+        finish_task(result_id, 'source_incomplete', error, schedule, run_id)
+        db.session.commit()
+        return IngestOutcome(result_id, 'source_incomplete', error)
+    except (SQLAlchemyError, SourceError, OSError, TypeError, ValueError) as exc:
+        return mark_failure(result_id, exc, schedule, run_id)
+
+
+def _check_metadata_roster_refresh(existing, data):
+    """真实色方可以互换，同一来源选手的已知战队身份不能随槽位换队。"""
+    match = data['matches'][0]
+    old_players = db.session.query(Player).filter_by(match_id=existing.match_id).all()
+    old_ids = {player.source_player_id for player in old_players}
+    new_ids = {player['source_player_id'] for player in data['players']}
+    if (existing.series_id != match['series_id'] or len(old_players) != 10 or len(data['players']) != 10
+            or None in new_ids or old_ids != new_ids):
+        raise InvalidResult('刷新来源不能证明与已存 metadata 相同的十位选手身份')
+    old_proof = existing.team_name_provenance
+    if not isinstance(old_proof, dict) or not isinstance(old_proof.get('detail'), dict):
+        raise InvalidResult('已存 metadata 缺少可靠战队身份依据')
+    old_team_ids = old_proof['detail']['team_ids']
+    new_team_ids = match['team_name_provenance']['detail']['team_ids']
+    if (None in new_team_ids.values() or len(set(new_team_ids.values())) != 2
+            or set(old_team_ids.values()) != set(new_team_ids.values())):
+        raise InvalidResult('刷新来源不能证明 metadata 的相同双方战队 ID')
+    old_teams = {getattr(existing, f'{side}_team_name'): old_team_ids[side] for side in ('red', 'blue')}
+    new_teams = {match[f'{side}_team_name']: new_team_ids[side] for side in ('red', 'blue')}
+    previous_teams = {player.source_player_id: old_teams.get(player.team_name) for player in old_players}
+    if any(previous_teams[player['source_player_id']] != new_teams.get(player['team_name'])
+           for player in data['players']):
+        raise InvalidResult('刷新来源选手 ID 的已知战队归属与 metadata 矛盾')
+
+
 def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomplete=False, replace_existing=False,
                   names_by_source_id=None):
     try:
@@ -539,6 +640,8 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
         previous = (existing.team_name_provenance if existing is not None
                     and existing.source == 'scoregg' and existing.verified else None)
         data = normalize_result(payload, result_id, schedule, allow_incomplete, names_by_source_id, previous)
+        if existing is not None and existing.verified and existing.source == 'scoregg_metadata':
+            _check_metadata_roster_refresh(existing, data)
     except SQLAlchemyError as exc:
         return mark_failure(result_id, exc, schedule, run_id)
     except NonLOLResult as exc:
@@ -559,7 +662,7 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
         return mark_failure(result_id, exc, schedule, run_id)
     try:
         preserve_nulls = (not replace_existing and existing is not None
-                          and existing.source == 'scoregg' and existing.verified)
+                          and existing.source in ('scoregg', 'scoregg_metadata') and existing.verified)
         if existing is not None and existing.date_source == 'schedule' and data['matches'][0]['date_source'] != 'schedule':
             data['matches'][0]['date'] = existing.date
             data['matches'][0]['date_source'] = 'schedule'
@@ -568,11 +671,15 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
         # 未核验旧值不能借本次 gameID 证据升为来源数据；首次核验按原始详情清除缺项。
         # 只有此前已核验的 ScoreGG 记录，才允许保留早前有来源依据的可选指标。
         _rekey_verified_team_names(existing, data)
-        if preserve_nulls:
+        has_ids = any(row.get('source_player_id') is not None for row in data['players'])
+        if preserve_nulls and not has_ids:
             _discard_changed_player_slots(data)
         bulk_upsert(Match, data['matches'], ['match_id'], preserve_nulls=preserve_nulls)
         bulk_upsert(Team, data['teams'], ['match_id', 'team_name'], preserve_nulls=preserve_nulls)
-        bulk_upsert(Player, data['players'], ['match_id', 'team_name', 'position'], preserve_nulls=preserve_nulls)
+        if has_ids:
+            _upsert_identified_players(data['players'], preserve_nulls)
+        else:
+            bulk_upsert(Player, data['players'], ['match_id', 'team_name', 'position'], preserve_nulls=preserve_nulls)
         # 来源明确给出占位/非法时长时，先前的值也不能继续作为统计分母。
         if data.get('invalid_duration'):
             for model in (Match, Team, Player):
@@ -614,6 +721,6 @@ def ingest_result(payload, result_id, schedule=None, run_id=None, allow_incomple
         error = ', '.join(data['source_incomplete']) if data.get('source_incomplete') else None
         finish_task(result_id, status, error, schedule=schedule, run_id=run_id)
         db.session.commit()
-    except SQLAlchemyError as exc:
+    except (SQLAlchemyError, InvalidResult) as exc:
         return mark_failure(result_id, exc, schedule, run_id)
     return IngestOutcome(result_id, status, error)

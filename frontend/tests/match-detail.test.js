@@ -21,7 +21,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function showMatch({ count, verified, duration, metrics = {} }) {
+async function showMatch({
+  count,
+  verified,
+  duration,
+  metrics = {},
+  sideBasis = "scoregg_red_blue",
+}) {
   const players = Array.from({ length: count }, (_, index) => ({
     name: `已收录选手${index + 1}`,
     team_name: index < 5 ? "蓝队" : "红队",
@@ -52,6 +58,7 @@ async function showMatch({ count, verified, duration, metrics = {} }) {
               red_team_name: "红队",
               win_team_name: "蓝队",
               date: null,
+              side_basis: sideBasis,
             },
             players,
             blue_team: null,
@@ -80,6 +87,60 @@ async function showMatch({ count, verified, duration, metrics = {} }) {
 }
 
 describe("比赛详情数据质量", () => {
+  it("基础战报按来源双方顺序展示，不猜红蓝方和选手位置", async () => {
+    await showMatch({
+      count: 10,
+      verified: true,
+      duration: null,
+      sideBasis: "metadata_team_a_b",
+      metrics: {
+        position: null,
+        atk: null,
+        atk_m: null,
+        money: null,
+        hits: null,
+      },
+    });
+    expect(
+      [...document.querySelectorAll(".score-team .eyebrow")].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["队伍 A", "队伍 B"]);
+    expect(
+      [...document.querySelectorAll(".analysis-grid .tag")].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["队伍 A", "队伍 B"]);
+    expect(
+      [...document.querySelectorAll(".section-space h2")]
+        .map((element) => element.textContent)
+        .filter((label) => label.endsWith("选手数据")),
+    ).toEqual(["队伍 A选手数据", "队伍 B选手数据"]);
+    const notice = document.querySelector(".match-quality-notice").textContent;
+    expect(notice).toContain("红蓝方尚未确认，双方按来源顺序展示");
+    expect(notice).toContain("部分选手位置待确认");
+    expect(notice).toContain("缺少可信比赛时长");
+    expect(notice).not.toContain("阵容有缺项");
+    for (const row of document.querySelectorAll("tbody tr"))
+      expect(row.querySelectorAll("td")[1].textContent).toBe("未记录");
+    expect(document.querySelector('[role="img"]')).toBeNull();
+    expect(document.querySelector(".victory").textContent).toBe("胜利");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("完整战报仍使用真实红蓝方，保留已确认位置和精确时长", async () => {
+    await showMatch({ count: 10, verified: true, duration: 1800 });
+    expect(
+      [...document.querySelectorAll(".score-team .eyebrow")].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["蓝方", "红方"]);
+    expect(document.querySelector(".score-center strong").textContent).toBe(
+      "30:00",
+    );
+    expect(document.querySelector(".match-quality-notice")).toBeNull();
+    for (const row of document.querySelectorAll("tbody tr"))
+      expect(row.querySelectorAll("td")[1].textContent).toBe("上单");
+  });
   it("公开9人战报和未知时长只展示已确认选手，并准确说明分均缺失", async () => {
     await showMatch({ count: 9, verified: true, duration: null });
     expect(document.querySelector(".page-heading").textContent).toContain(

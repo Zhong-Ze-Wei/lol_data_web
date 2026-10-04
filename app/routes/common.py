@@ -127,6 +127,8 @@ def match_data(match):
         'tournament_name': match.tournament_name,
         'date': match.date.strftime('%Y-%m-%d') if match.date and match.date_source == 'schedule' else None,
         'date_source': match.date_source, 'source': match.source, 'verified': match.verified,
+        'side_basis': ('metadata_team_a_b' if match.source == 'scoregg_metadata'
+                       else 'scoregg_red_blue'),
         'game_time': match.game_time if match.game_time is not None and match.game_time > 1 else None,
         'red_team_name': match.red_team_name,
         'blue_team_name': match.blue_team_name, 'win_team_name': match.win_team_name,
@@ -137,7 +139,7 @@ def match_data(match):
 def player_data(player, match):
     from app.services.stat_metrics import per_minute_number
 
-    fields = ('name', 'pic', 'hero', 'hero_lv', 'kda', 'kills', 'deaths', 'assists',
+    fields = ('name', 'source_player_id', 'pic', 'hero', 'hero_lv', 'kda', 'kills', 'deaths', 'assists',
               'part', 'atk', 'atk_p', 'atk_m', 'def_', 'def_p', 'def_m', 'adc_m',
               'hits', 'money', 'money_M', 'wp_m', 'team_name', 'position', 'result', 'match_id')
     data = {field: getattr(player, field) for field in fields}

@@ -7,6 +7,7 @@ class Player(db.Model):
     __tablename__ = 'players'
     __table_args__ = (
         db.UniqueConstraint('match_id', 'team_name', 'position', name='uq_player_match_team_position'),
+        db.Index('uq_player_match_source_player', 'match_id', 'source_player_id', unique=True),
         db.Index('ix_player_name_date_id', 'name', 'date', 'id'),
         db.Index('ix_player_position_date', 'position', 'date'),
     )
@@ -14,6 +15,7 @@ class Player(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.DateTime, nullable=True, index=True)
     name = db.Column(db.String(100), nullable=True, index=True)
+    source_player_id = db.Column(db.String(100), nullable=True)
     pic = db.Column(db.String(255), nullable=True)
     hero = db.Column(db.String(255), nullable=True, index=True)
     hero_lv = db.Column(db.Integer, nullable=True)

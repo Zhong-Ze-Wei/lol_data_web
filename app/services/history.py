@@ -477,7 +477,15 @@ def _fetch_task(client, task, raw_dir, run_id, now):
             payload = None
     start_task(task.result_id, schedule, run_id)
     if payload is None:
-        payload = client.get_result(task.result_id)
+        try:
+            payload = client.get_result(task.result_id)
+        except SourceHTTPError as exc:
+            from app.services.metadata_snapshot import metadata_after_detail_404
+
+            partial = metadata_after_detail_404(exc, task.result_id, schedule, raw_dir, run_id)
+            if partial is None:
+                raise
+            return partial
         raw_file, sha256 = _archive(path, payload)
         schedule['detail_archive'] = {'raw_file': raw_file, 'sha256': sha256}
     allow_incomplete = series_allows_incomplete or (legacy_candidate and has_finished_lol_evidence(payload, task.result_id))
