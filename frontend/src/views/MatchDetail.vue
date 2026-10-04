@@ -154,6 +154,7 @@ const damage = computed(() => {
           <span class="versus">VS</span
           ><strong>{{ duration(match.game_time) }}</strong
           ><span>{{ date(match.date) }}</span
+          ><small v-if="!match.win_team_name">胜负待确认</small
           ><small v-if="match.mvp">MVP / {{ match.mvp }}</small>
         </div>
         <div class="score-team red">

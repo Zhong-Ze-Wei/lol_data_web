@@ -261,7 +261,7 @@ function page(value) {
               <td>
                 <span v-if="row.win_team_name" class="winner-name"
                   ><Icon name="match" />{{ row.win_team_name }}</span
-                ><span v-else class="muted">未记录</span>
+                ><span v-else class="muted">待确认</span>
               </td>
               <td class="numeric">{{ duration(row.game_time) }}</td>
               <td><MatchStatus :verified="row.verified" /></td>

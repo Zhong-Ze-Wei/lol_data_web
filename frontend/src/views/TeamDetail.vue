@@ -117,7 +117,7 @@ function page(value) {
                   <td
                     :class="match.win_team_name === name ? 'positive' : 'muted'"
                   >
-                    {{ match.win_team_name }}
+                    {{ match.win_team_name || "胜负待确认" }}
                   </td>
                   <td class="numeric">{{ duration(match.game_time) }}</td>
                   <td>
