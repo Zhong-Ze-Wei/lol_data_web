@@ -43,6 +43,20 @@ def create_app(test_config=None):
                 connection.execute("PRAGMA journal_mode=WAL")
             if app.config["AUTO_CREATE_DB"]:
                 db.create_all()
+            from scripts.migrate_source_player_id import MigrationError, inspect_schema
+
+            try:
+                with db.engine.connect() as connection:
+                    driver = connection.connection.driver_connection
+                    if driver.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='players'").fetchone():
+                        if inspect_schema(driver) != 'already_current':
+                            database = db.engine.url.database
+                            raise MigrationError(
+                                '选手来源 ID schema 需要显式升级；先执行 '
+                                f'python -m scripts.migrate_source_player_id --database "{database}" --apply')
+            except MigrationError:
+                db.engine.dispose()
+                raise
 
     @app.get("/api/health")
     def health():

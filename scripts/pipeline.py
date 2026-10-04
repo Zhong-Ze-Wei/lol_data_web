@@ -114,6 +114,15 @@ def _fetch_result(client, result_id, schedule, run, raw_dir, outcomes):
     except BudgetExceeded as exc:
         mark_failure(result_id, exc, schedule, run.id, status='queued')
         raise
+    except SourceHTTPError as exc:
+        from app.services.metadata_snapshot import metadata_after_detail_404
+
+        try:
+            item = metadata_after_detail_404(exc, result_id, schedule, raw_dir, run.id)
+            if item is None:
+                item = mark_failure(result_id, exc, schedule, run.id).to_dict()
+        except (SourceError, OSError, ValueError, TypeError) as failure:
+            item = mark_failure(result_id, failure, schedule, run.id).to_dict()
     except SourceError as exc:
         item = mark_failure(result_id, exc, schedule, run.id).to_dict()
     except OSError as exc:
@@ -159,6 +168,9 @@ def _fetch_series(client, schedule, run, raw_dir, outcomes, max_attempts, now):
             payload, evidence = metadata_result_list_after_404(client, schedule, raw_dir, exc)
             result_ids = result_ids_from_list(payload, schedule['series_id'])
             source_context['resultlist_evidence'] = evidence
+            schedule = {**schedule, 'metadata_archive': {
+                'raw_file': evidence['raw_file'], 'sha256': evidence['sha256'],
+                'evidence_file': evidence['evidence_file']}}
     except BudgetExceeded as exc:
         mark_failure(None, exc, schedule, run.id, status='queued')
         raise

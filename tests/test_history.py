@@ -527,14 +527,13 @@ def test_unmapped_partial_transaction_failure_preserves_existing_business_rows(d
     db.session.add(Player(match_id=18894, team_name='LM', position='a', name='CSV name', kills=99))
     db.session.commit()
     history._seed_known_legacy()
-    original_upsert = ingestion.bulk_upsert
+    original_upsert = ingestion._upsert_identified_players
 
-    def fail_player_write(model, rows, keys, **kwargs):
-        if model is Player:
-            raise IntegrityError('fixture player write', {}, Exception('fixture transaction failure'))
-        return original_upsert(model, rows, keys, **kwargs)
+    def fail_player_write(rows, preserve_nulls):
+        original_upsert(rows, preserve_nulls)
+        raise IntegrityError('fixture player write', {}, Exception('fixture transaction failure'))
 
-    monkeypatch.setattr(ingestion, 'bulk_upsert', fail_player_write)
+    monkeypatch.setattr(ingestion, '_upsert_identified_players', fail_player_write)
     outcome = history._fetch_task(HistoricalSource(legacy_partial_result), db.session.query(SyncTask).one(),
                                   tmp_path / 'raw', None, datetime(2026, 10, 3))
     assert outcome['status'] == 'failed'
